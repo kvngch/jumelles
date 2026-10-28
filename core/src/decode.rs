@@ -24,7 +24,7 @@ mod wic {
     use windows::Win32::Foundation::GENERIC_READ;
     use windows::Win32::Graphics::Imaging::*;
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
-    use windows::core::HSTRING;
+    use windows::core::{HSTRING, Interface};
 
     thread_local! {
         // Une fabrique par fil de calcul, COM initialise en multithread
@@ -47,8 +47,12 @@ mod wic {
                 let frame = decoder.GetFrame(0)?;
                 let (mut width, mut height) = (0, 0);
                 frame.GetSize(&mut width, &mut height)?;
+                let source = match reduced(f, &frame) {
+                    Ok(s) => s,
+                    Err(_) => frame.cast()?,
+                };
                 let scaler = f.CreateBitmapScaler()?;
-                scaler.Initialize(&frame, SIDE as u32, SIDE as u32, WICBitmapInterpolationModeFant)?;
+                scaler.Initialize(&source, SIDE as u32, SIDE as u32, WICBitmapInterpolationModeFant)?;
                 let gray = f.CreateFormatConverter()?;
                 gray.Initialize(
                     &scaler,
@@ -63,6 +67,38 @@ mod wic {
                 Ok(Small { width, height, px })
             }
         })
+    }
+
+    /// Image decodee directement a la plus petite taille que le decodeur sait produire :
+    /// un JPEG au huitieme, sans calculer ses pixels en pleine definition
+    unsafe fn reduced(
+        f: &IWICImagingFactory,
+        frame: &IWICBitmapFrameDecode,
+    ) -> windows::core::Result<IWICBitmapSource> {
+        unsafe {
+            let transform: IWICBitmapSourceTransform = frame.cast()?;
+            let (mut w, mut h) = (SIDE as u32, SIDE as u32);
+            transform.GetClosestSize(&mut w, &mut h)?;
+            let mut format = GUID_WICPixelFormat8bppGray;
+            transform.GetClosestPixelFormat(&mut format)?;
+            let bytes = match format {
+                f if f == GUID_WICPixelFormat8bppGray => 1,
+                f if f == GUID_WICPixelFormat24bppBGR => 3,
+                _ => return Err(windows::core::Error::empty()),
+            };
+            let stride = w * bytes;
+            let mut buf = vec![0u8; (stride * h) as usize];
+            transform.CopyPixels(
+                std::ptr::null(),
+                w,
+                h,
+                &format,
+                WICBitmapTransformRotate0,
+                stride,
+                &mut buf,
+            )?;
+            f.CreateBitmapFromMemory(w, h, &format, stride, &buf)?.cast()
+        }
     }
 }
 
