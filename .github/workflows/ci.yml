@@ -23,7 +23,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p jumelles
 
-      # L'exe doit tourner sans le runtime Visual C++ installe
+      # L'exe doit tourner sans le runtime Visual C++ installe. Le CRT universel
+      # (api-ms-win-crt-*) fait partie de Windows 10 et 11.
       - name: Dependances de l'exe
         shell: pwsh
         run: |
@@ -31,7 +32,7 @@ jobs:
           $dumpbin = (Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
           $deps = & $dumpbin /nologo /dependents target\release\jumelles.exe
           $deps
-          if ($deps -match 'VCRUNTIME|MSVCP|api-ms-win-crt') { throw "l'exe depend du runtime Visual C++" }
+          if ($deps -match 'VCRUNTIME|MSVCP') { throw "l'exe depend du runtime Visual C++" }
 
       - name: Lancement
         shell: pwsh
