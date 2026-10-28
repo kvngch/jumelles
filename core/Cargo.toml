@@ -6,3 +6,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rayon = "1.12"
+walkdir = "2.5"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[target."cfg(windows)".dependencies]
+winapi-util = "0.1"

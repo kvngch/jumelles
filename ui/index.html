@@ -5,11 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jumelles</title>
   <link rel="stylesheet" href="style.css">
+  <script src="main.js" defer></script>
 </head>
 <body>
-  <main>
-    <h1>Jumelles</h1>
-    <p>Version de développement.</p>
-  </main>
+  <h1>Jumelles</h1>
+
+  <section>
+    <h2>Dossiers à analyser</h2>
+    <ul id="liste" class="dossiers"></ul>
+    <p id="vide" class="discret">Aucun dossier. Ajoutez-en un ou déposez-le dans la fenêtre.</p>
+    <div class="actions">
+      <button id="ajouter" type="button">Ajouter un dossier</button>
+      <button id="analyser" type="button" class="principal" disabled>Analyser</button>
+    </div>
+    <p id="etat" class="discret" role="status"></p>
+  </section>
+
+  <section id="resultats" hidden>
+    <h2 id="titre-resultats"></h2>
+    <div id="groupes"></div>
+  </section>
 </body>
 </html>
