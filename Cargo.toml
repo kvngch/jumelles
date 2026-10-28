@@ -1,0 +1,14 @@
+[workspace]
+members = ["core", "app"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/kvngch/jumelles"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
