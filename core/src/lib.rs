@@ -148,16 +148,7 @@ fn group(photos: &[Photo], reps: &[usize], exact: &[Vec<usize>], max: u32) -> Ve
         .filter_map(|&i| photos[i].print.map(|p| p.hashes))
         .collect();
 
-    // ponytail: toutes les paires comparees, O(n^2), quelques secondes a 100 000 photos ;
-    // un index (multi-index hashing) si des bibliotheques plus grandes le demandent
-    let mut near: Vec<Vec<(usize, u32)>> = (0..order.len())
-        .into_par_iter()
-        .map(|a| {
-            (a + 1..order.len())
-                .filter_map(|b| phash::near(&hashes[a], &hashes[b], max).map(|d| (b, d)))
-                .collect()
-        })
-        .collect();
+    let mut near = phash::close_pairs(&hashes, max);
 
     let member = |photo, identical, distance| Member {
         photo,
@@ -487,6 +478,9 @@ mod tests {
             .to_luma8()
             .save(d.join("a-nb.png"))
             .unwrap();
+        image::imageops::rotate90(&photo(640, 480, 1))
+            .save(d.join("a-tournee.jpg"))
+            .unwrap();
         photo(640, 480, 7).save(d.join("b.jpg")).unwrap();
 
         let r = analyse(std::slice::from_ref(&d), DEFAULT_MAX_DISTANCE, &Progress::default());
@@ -503,7 +497,10 @@ mod tests {
         };
         let mut tries: Vec<String> = g.iter().map(nom).collect();
         tries.sort();
-        assert_eq!(tries, ["a-copie.jpg", "a-nb.png", "a-petite.jpg", "a.jpg"]);
+        assert_eq!(
+            tries,
+            ["a-copie.jpg", "a-nb.png", "a-petite.jpg", "a-tournee.jpg", "a.jpg"]
+        );
         assert!(nom(&g[0]).ends_with(".jpg") && nom(&g[0]).starts_with("a") && nom(&g[0]) != "a-petite.jpg");
         assert!(g[1].identical && nom(&g[1]) != "a-petite.jpg" && nom(&g[1]) != "a-nb.png");
         for m in &g[2..] {
@@ -524,7 +521,7 @@ mod tests {
                 .unwrap()
                 .hashes
         };
-        for n in ["a-petite.jpg", "a-nb.png", "b.jpg"] {
+        for n in ["a-petite.jpg", "a-nb.png", "a-tournee.jpg", "b.jpg"] {
             let (a, b) = (print("a.jpg"), print(n));
             let fine: u32 = a.fine[0]
                 .iter()

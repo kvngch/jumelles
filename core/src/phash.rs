@@ -2,6 +2,7 @@
 //! grossiere de 64 bits pour trouver les paires candidates, une fine de 256 bits pour
 //! les confirmer.
 
+use rayon::prelude::*;
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
@@ -77,18 +78,72 @@ pub fn hashes(px: &[u8; SIDE * SIDE]) -> Hashes {
     }
 }
 
-/// Distance fine, en bits sur 256, entre `a` et `b` dans son orientation d'origine, si
-/// les deux empreintes restent sous le seuil `max` exprime en bits sur 64
+/// Distance fine, en bits sur 256, entre `a` et l'orientation de `b` la plus proche, parmi
+/// celles dont les deux empreintes restent sous le seuil `max` exprime en bits sur 64
 pub fn near(a: &Hashes, b: &Hashes, max: u32) -> Option<u32> {
-    ((a.coarse[0] ^ b.coarse[0]).count_ones() <= max)
-        .then(|| {
+    (0..8)
+        .filter(|&k| (a.coarse[0] ^ b.coarse[k]).count_ones() <= max)
+        .map(|k| {
             a.fine[0]
                 .iter()
-                .zip(&b.fine[0])
+                .zip(&b.fine[k])
                 .map(|(x, y)| (x ^ y).count_ones())
                 .sum()
         })
         .filter(|&d| d <= 4 * max)
+        .min()
+}
+
+/// Pour chaque empreinte, les suivantes qui en sont proches, avec leur distance fine.
+// ponytail: toutes les paires comparees, O(n^2), quelques secondes a 100 000 photos ;
+// un index (multi-index hashing) si des bibliotheques plus grandes le demandent
+pub fn close_pairs(hashes: &[Hashes], max: u32) -> Vec<Vec<(usize, u32)>> {
+    // Empreintes grossieres a part et contigues : le test rapide ecarte presque toutes les
+    // paires sans charger les empreintes fines
+    let coarse: Vec<[u64; 8]> = hashes.iter().map(|h| h.coarse).collect();
+    (0..hashes.len())
+        .into_par_iter()
+        .map(|a| {
+            let mut candidates = Vec::new();
+            coarse_row(&coarse, a, max, &mut candidates);
+            candidates
+                .into_iter()
+                .filter_map(|b| near(&hashes[a], &hashes[b], max).map(|d| (b, d)))
+                .collect()
+        })
+        .collect()
+}
+
+/// Indices b > a dont une orientation passe le seuil grossier. L'instruction popcnt, que
+/// tous les processeurs x86-64 ont depuis 2008, compte les bits plusieurs fois plus vite
+/// que la suite d'operations du jeu d'instructions de base.
+fn coarse_row(coarse: &[[u64; 8]], a: usize, max: u32, out: &mut Vec<usize>) {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("popcnt") {
+        // SAFETY: popcnt vient d'etre detecte sur ce processeur
+        return unsafe { coarse_row_popcnt(coarse, a, max, out) };
+    }
+    coarse_row_body(coarse, a, max, out)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "popcnt")]
+fn coarse_row_popcnt(coarse: &[[u64; 8]], a: usize, max: u32, out: &mut Vec<usize>) {
+    coarse_row_body(coarse, a, max, out)
+}
+
+#[inline(always)]
+fn coarse_row_body(coarse: &[[u64; 8]], a: usize, max: u32, out: &mut Vec<usize>) {
+    let c = coarse[a][0];
+    for (b, hb) in coarse.iter().enumerate().skip(a + 1) {
+        let mut best = 64;
+        for &h in hb {
+            best = best.min((c ^ h).count_ones());
+        }
+        if best <= max {
+            out.push(b);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -153,8 +208,10 @@ mod tests {
             }
             p = rot90(&p);
         }
-        // sans les orientations, un quart de tour est loin de l'original
-        assert!(near(&hashes(&rot90(&a)), &ha, 16).is_none());
+        // un quart de tour retrouve l'original par les orientations, pas sans elles
+        let hr = hashes(&rot90(&a));
+        assert!(near(&hr, &ha, 10).is_some_and(|d| d <= 8));
+        assert!((hr.coarse[0] ^ ha.coarse[0]).count_ones() > 16);
     }
 
     #[test]
