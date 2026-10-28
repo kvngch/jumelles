@@ -3,6 +3,7 @@
 pub mod cache;
 pub mod decode;
 pub mod phash;
+pub mod remove;
 
 pub use cache::Cache;
 

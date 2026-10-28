@@ -10,7 +10,9 @@ tauri-build = "2.7"
 
 [dependencies]
 jumelles-core = { path = "../core" }
+rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 # custom-protocol : interface embarquee dans l'exe, pas de serveur de dev
 tauri = { version = "2.12", features = ["custom-protocol"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
