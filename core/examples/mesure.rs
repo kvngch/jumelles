@@ -79,13 +79,9 @@ fn main() {
         })
         .collect();
     let t = Instant::now();
-    let proches: usize = (0..m)
-        .into_par_iter()
-        .map(|a| {
-            (a + 1..m)
-                .filter(|&b| phash::near(&hashes[a], &hashes[b], DEFAULT_MAX_DISTANCE).is_some())
-                .count()
-        })
+    let proches: usize = phash::close_pairs(&hashes, DEFAULT_MAX_DISTANCE)
+        .iter()
+        .map(Vec::len)
         .sum();
     println!(
         "paires : {m} empreintes aleatoires en {:.2} s, {proches} paires proches",
