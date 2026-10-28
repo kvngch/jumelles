@@ -1,7 +1,10 @@
 //! Moteur de Jumelles : parcours des dossiers, empreintes, regroupement.
 
+pub mod cache;
 pub mod decode;
 pub mod phash;
+
+pub use cache::Cache;
 
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -30,7 +33,7 @@ pub const DEFAULT_MAX_DISTANCE: u32 = 10;
 pub struct Photo {
     pub path: PathBuf,
     pub size: u64,
-    /// Secondes depuis 1970, 0 si le systeme ne la donne pas
+    /// Millisecondes depuis 1970, 0 si le systeme ne la donne pas
     pub modified: i64,
     /// Dimensions et empreintes, absentes si la photo n'a pas ete decodee
     pub print: Option<Print>,
@@ -73,6 +76,8 @@ pub struct Analysis {
     pub unreadable: usize,
     /// Photos lues mais pas decodees
     pub undecodable: usize,
+    /// Photos decodees pendant cette analyse, les autres venant du cache
+    pub decoded: usize,
 }
 
 /// Copies exactes, chemins a ecarter (second chemin vers un meme fichier, fichier
@@ -89,7 +94,7 @@ pub fn is_image(path: &Path) -> bool {
         .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress) -> Analysis {
+pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress, cache: &mut Cache) -> Analysis {
     let (mut photos, unreadable) = walk(roots, progress);
     let exact = identical(&photos, progress);
 
@@ -102,20 +107,29 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress) -> Ana
     }
     let reps: Vec<usize> = (0..photos.len()).filter(|&i| !skip[i]).collect();
     progress.to_decode.store(reps.len(), Ordering::Relaxed);
-    let prints: Vec<Option<Print>> = reps
+    let known: &Cache = cache;
+    let prints: Vec<(Option<Print>, bool)> = reps
         .par_iter()
         .map(|&i| {
-            let print = decode::small(&photos[i].path).ok().map(|s| Print {
-                width: s.width,
-                height: s.height,
-                hashes: phash::hashes(&s.px),
-            });
+            let p = &photos[i];
+            let print = match known.get(&p.path, p.size, p.modified) {
+                Some(print) => (Some(print), false),
+                None => {
+                    let print = decode::small(&p.path).ok().map(|s| Print {
+                        width: s.width,
+                        height: s.height,
+                        hashes: phash::hashes(&s.px),
+                    });
+                    (print, true)
+                }
+            };
             progress.decoded.fetch_add(1, Ordering::Relaxed);
             print
         })
         .collect();
-    let undecodable = prints.iter().filter(|p| p.is_none()).count();
-    for (&i, print) in reps.iter().zip(prints) {
+    let undecodable = prints.iter().filter(|p| p.0.is_none()).count();
+    let decoded = prints.iter().filter(|p| p.1).count();
+    for (&i, (print, _)) in reps.iter().zip(prints) {
         photos[i].print = print;
     }
     for g in &exact.groups {
@@ -124,6 +138,10 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress) -> Ana
             photos[i].print = print;
         }
     }
+    for p in photos.iter().filter(|p| p.print.is_some()) {
+        cache.put(p.path.clone(), p.size, p.modified, p.print.unwrap());
+    }
+    cache.prune(roots, &photos.iter().map(|p| p.path.as_path()).collect());
 
     let groups = group(&photos, &reps, &exact.groups, max_distance);
     Analysis {
@@ -131,6 +149,7 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress) -> Ana
         groups,
         unreadable: unreadable + exact.failed,
         undecodable,
+        decoded,
     }
 }
 
@@ -245,7 +264,7 @@ fn walk(roots: &[PathBuf], progress: &Progress) -> (Vec<Photo>, usize) {
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs() as i64);
+                .map_or(0, |d| d.as_millis() as i64);
             photos.push(Photo {
                 path: entry.into_path(),
                 size: meta.len(),
@@ -420,7 +439,12 @@ mod tests {
         fs::write(d.join("vide2.jpg"), b"").unwrap();
 
         let progress = Progress::default();
-        let a = analyse(std::slice::from_ref(&d), DEFAULT_MAX_DISTANCE, &progress);
+        let a = analyse(
+            std::slice::from_ref(&d),
+            DEFAULT_MAX_DISTANCE,
+            &progress,
+            &mut Cache::default(),
+        );
         assert_eq!(a.photos.len(), 8);
         assert_eq!(progress.found.load(Ordering::Relaxed), 8);
         assert_eq!(noms(&a), [["a.jpg", "a-copie.JPG"], ["petit1.gif", "petit2.gif"]]);
@@ -442,6 +466,7 @@ mod tests {
             &[d.join("sous"), d.clone(), d.clone()],
             DEFAULT_MAX_DISTANCE,
             &Progress::default(),
+            &mut Cache::default(),
         );
         assert_eq!(a.groups.len(), 1);
         assert_eq!(a.groups[0].len(), 2);
@@ -483,7 +508,12 @@ mod tests {
             .unwrap();
         photo(640, 480, 7).save(d.join("b.jpg")).unwrap();
 
-        let r = analyse(std::slice::from_ref(&d), DEFAULT_MAX_DISTANCE, &Progress::default());
+        let r = analyse(
+            std::slice::from_ref(&d),
+            DEFAULT_MAX_DISTANCE,
+            &Progress::default(),
+            &mut Cache::default(),
+        );
         assert_eq!(r.undecodable, 0);
         assert_eq!(r.groups.len(), 1, "{:?}", noms(&r));
         let g = &r.groups[0];
@@ -533,6 +563,47 @@ mod tests {
                 (a.coarse[0] ^ b.coarse[0]).count_ones()
             );
         }
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn cache_des_empreintes() {
+        let d = dossier("cache");
+        photo(320, 240, 1).save(d.join("a.jpg")).unwrap();
+        photo(320, 240, 2).save(d.join("b.jpg")).unwrap();
+        let fichier = d.join("jumelles.cache");
+        let analyser = |cache: &mut Cache| {
+            analyse(
+                std::slice::from_ref(&d),
+                DEFAULT_MAX_DISTANCE,
+                &Progress::default(),
+                cache,
+            )
+        };
+
+        let mut cache = Cache::load(&fichier);
+        assert!(cache.is_empty());
+        assert_eq!(analyser(&mut cache).decoded, 2);
+        cache.save(&fichier).unwrap();
+
+        // deuxieme analyse : rien a decoder
+        let mut cache = Cache::load(&fichier);
+        assert_eq!(cache.len(), 2);
+        let r = analyser(&mut cache);
+        assert_eq!(r.decoded, 0);
+        assert!(r.photos.iter().all(|p| p.print.is_some()));
+
+        // une photo modifiee est decodee de nouveau, une photo supprimee est oubliee
+        photo(400, 300, 3).save(d.join("a.jpg")).unwrap();
+        fs::remove_file(d.join("b.jpg")).unwrap();
+        let r = analyser(&mut cache);
+        assert_eq!(r.decoded, 1);
+        assert_eq!(r.photos[0].print.unwrap().width, 400);
+        assert_eq!(cache.len(), 1);
+
+        // un cache abime se lit comme un cache vide
+        fs::write(&fichier, b"JUMELLES\x01\x00\x00\x00\x05\x00").unwrap();
+        assert!(Cache::load(&fichier).is_empty());
         fs::remove_dir_all(d).unwrap();
     }
 }

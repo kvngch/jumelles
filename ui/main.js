@@ -70,7 +70,7 @@ function afficherResultats(r) {
       li.append(
         element('span', f.chemin, 'chemin'),
         element('span', f.largeur ? `${f.largeur} × ${f.hauteur}` : ''),
-        element('span', `${poids(f.taille)}, ${jour.format(new Date(f.modifie * 1000))}`),
+        element('span', `${poids(f.taille)}, ${jour.format(new Date(f.modifie))}`),
         element('span', ressemblance(f, i)),
       );
       return li;
