@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p jumelles-core
+
+  app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p jumelles
+
+      # L'exe doit tourner sans le runtime Visual C++ installe. Le CRT universel
+      # (api-ms-win-crt-*) fait partie de Windows 10 et 11.
+      - name: Dependances de l'exe
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = (Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
+          $deps = & $dumpbin /nologo /dependents target\release\jumelles.exe
+          $deps
+          if ($deps -match 'VCRUNTIME|MSVCP') { throw "l'exe depend du runtime Visual C++" }
+
+      - name: Lancement
+        shell: pwsh
+        run: |
+          $p = Start-Process target\release\jumelles.exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "l'exe s'est arrete, code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id
+
+      - name: Zip et empreinte
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target\release\jumelles.exe -DestinationPath jumelles-windows-x64.zip
+          $h = (Get-FileHash jumelles-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  jumelles-windows-x64.zip" | Set-Content -Encoding ascii jumelles-windows-x64.zip.sha256
+          Get-Content jumelles-windows-x64.zip.sha256
+          (Get-Item target\release\jumelles.exe).Length / 1MB
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jumelles-windows-x64
+          path: jumelles-windows-x64.zip*

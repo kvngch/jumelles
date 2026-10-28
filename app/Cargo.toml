@@ -1,0 +1,14 @@
+[package]
+name = "jumelles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+tauri-build = "2.7"
+
+[dependencies]
+jumelles-core = { path = "../core" }
+# custom-protocol : interface embarquee dans l'exe, pas de serveur de dev
+tauri = { version = "2.12", features = ["custom-protocol"] }
