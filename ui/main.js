@@ -47,23 +47,36 @@ function ajouter(chemins) {
   afficherDossiers();
 }
 
+function ressemblance(f, i) {
+  if (i === 0) return 'référence';
+  if (f.identique) return 'identique';
+  return `ressemblance ${Math.round(100 - (f.ecart * 100) / 256)} %`;
+}
+
 function afficherResultats(r) {
-  const enTrop = r.groupes.reduce((s, g) => s + g[0].taille * (g.length - 1), 0);
+  const liberable = r.groupes.reduce((s, g) => s + g.slice(1).reduce((t, f) => t + f.taille, 0), 0);
   let etat = `${nombre.format(r.photos)} photos analysées`;
   if (r.illisibles) etat += `, ${nombre.format(r.illisibles)} fichiers ou dossiers illisibles`;
+  if (r.nonDecodees) etat += `, ${nombre.format(r.nonDecodees)} photos dont le format n'a pas pu être lu`;
   $('etat').textContent = etat;
   $('titre-resultats').textContent = r.groupes.length
-    ? `${nombre.format(r.groupes.length)} groupes de copies exactes, ${poids(enTrop)} en double`
-    : 'Aucune copie exacte';
+    ? `${nombre.format(r.groupes.length)} groupes, jusqu'à ${poids(liberable)} à libérer`
+    : 'Aucune photo en double';
   $('groupes').replaceChildren(...r.groupes.map((g) => {
+    const identiques = g.every((f) => f.identique);
     const ul = element('ul');
-    ul.append(...g.map((f) => {
+    ul.append(...g.map((f, i) => {
       const li = element('li');
-      li.append(element('span', f.chemin, 'chemin'), element('time', jour.format(new Date(f.modifie * 1000))));
+      li.append(
+        element('span', f.chemin, 'chemin'),
+        element('span', f.largeur ? `${f.largeur} × ${f.hauteur}` : ''),
+        element('span', `${poids(f.taille)}, ${jour.format(new Date(f.modifie * 1000))}`),
+        element('span', ressemblance(f, i)),
+      );
       return li;
     }));
     const article = element('article');
-    article.append(element('h3', `${g.length} copies, ${poids(g[0].taille)} chacune`), ul);
+    article.append(element('h3', identiques ? `${g.length} copies identiques` : `${g.length} photos proches`), ul);
     return article;
   }));
   $('resultats').hidden = false;
@@ -80,8 +93,11 @@ getCurrentWebview().onDragDropEvent((e) => {
 
 listen('avancement', (e) => {
   if (!enCours) return;
-  const { trouvees, lues } = e.payload;
-  $('etat').textContent = `${nombre.format(trouvees)} photos trouvées, ${nombre.format(lues)} lues`;
+  const a = e.payload;
+  let etat = `${nombre.format(a.trouvees)} photos trouvées`;
+  if (a.aDecoder) etat = `Empreintes : ${nombre.format(a.decodees)} photos sur ${nombre.format(a.aDecoder)}`;
+  else if (a.aLire) etat = `Copies exactes : ${nombre.format(a.lues)} fichiers lus sur ${nombre.format(a.aLire)}`;
+  $('etat').textContent = etat;
 });
 
 $('analyser').onclick = async () => {
@@ -91,7 +107,7 @@ $('analyser').onclick = async () => {
   $('etat').textContent = 'Analyse en cours';
   afficherDossiers();
   try {
-    const r = await invoke('analyser', { dossiers });
+    const r = await invoke('analyser', { dossiers, ecart: Number($('ecart').value) });
     enCours = false;
     afficherResultats(r);
   } catch (err) {

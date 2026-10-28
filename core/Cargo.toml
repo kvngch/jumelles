@@ -12,3 +12,11 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [target."cfg(windows)".dependencies]
 winapi-util = "0.1"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Imaging", "Win32_System_Com"] }
+
+[target."cfg(not(windows))".dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp"] }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+rayon = "1.12"

@@ -16,6 +16,13 @@
     <p id="vide" class="discret">Aucun dossier. Ajoutez-en un ou déposez-le dans la fenêtre.</p>
     <div class="actions">
       <button id="ajouter" type="button">Ajouter un dossier</button>
+      <label class="reglage">Ressemblance
+        <select id="ecart">
+          <option value="4">Stricte</option>
+          <option value="10" selected>Normale</option>
+          <option value="14">Large</option>
+        </select>
+      </label>
       <button id="analyser" type="button" class="principal" disabled>Analyser</button>
     </div>
     <p id="etat" class="discret" role="status"></p>
