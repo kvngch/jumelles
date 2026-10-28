@@ -57,7 +57,8 @@ ul {
   margin-top: 16px;
 }
 
-button {
+button,
+select {
   font: inherit;
   color: var(--texte);
   background: transparent;
@@ -78,7 +79,16 @@ button:disabled {
   cursor: default;
 }
 
-button:focus-visible {
+.reglage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--discret);
+}
+
+button:focus-visible,
+select:focus-visible {
   outline: 2px solid #e0a03a;
   outline-offset: 2px;
 }
@@ -97,18 +107,19 @@ button:focus-visible {
 }
 
 #groupes li {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 4px 20px;
   padding: 2px 0;
+}
+
+#groupes li > :not(.chemin) {
+  color: var(--discret);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .chemin {
   overflow-wrap: anywhere;
 }
 
-time {
-  flex: none;
-  color: var(--discret);
-  font-variant-numeric: tabular-nums;
-}
