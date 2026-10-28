@@ -1,8 +1,9 @@
 // Pas de console derriere la fenetre en release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use jumelles_core::Progress;
+use jumelles_core::{Cache, Progress};
 use serde::Serialize;
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -38,6 +39,18 @@ struct Avancement {
     decodees: usize,
 }
 
+/// Fichier du cache : a cote de l'exe si son dossier accepte l'ecriture, sinon dans
+/// %LOCALAPPDATA%\Jumelles
+fn cache_file() -> Option<PathBuf> {
+    let beside = std::env::current_exe().ok().map(|e| e.with_file_name("jumelles.cache"));
+    if let Some(p) = beside.filter(|p| OpenOptions::new().create(true).append(true).open(p).is_ok()) {
+        return Some(p);
+    }
+    let dir = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Jumelles");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("jumelles.cache"))
+}
+
 #[tauri::command]
 async fn analyser(app: AppHandle, dossiers: Vec<PathBuf>, ecart: u32) -> Result<Resultat, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -59,7 +72,13 @@ async fn analyser(app: AppHandle, dossiers: Vec<PathBuf>, ecart: u32) -> Result<
                     std::thread::sleep(Duration::from_millis(100));
                 }
             });
-            let a = jumelles_core::analyse(&dossiers, ecart, &progress);
+            let fichier = cache_file();
+            let mut cache = fichier.as_deref().map(Cache::load).unwrap_or_default();
+            let a = jumelles_core::analyse(&dossiers, ecart, &progress, &mut cache);
+            // un cache qui ne s'ecrit pas ne coute qu'un decodage complet a la prochaine analyse
+            if let Some(f) = &fichier {
+                let _ = cache.save(f);
+            }
             fini.store(true, Ordering::Relaxed);
             a
         });

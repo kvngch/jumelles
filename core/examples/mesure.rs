@@ -3,7 +3,7 @@
 //!
 //! cargo run --release -p jumelles-core --example mesure -- <dossier> [nombre] [largeur] [hauteur]
 
-use jumelles_core::{DEFAULT_MAX_DISTANCE, Progress, analyse, decode, phash};
+use jumelles_core::{Cache, DEFAULT_MAX_DISTANCE, Progress, analyse, decode, phash};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -55,7 +55,12 @@ fn main() {
     );
 
     let t = Instant::now();
-    let a = analyse(std::slice::from_ref(&dir), DEFAULT_MAX_DISTANCE, &Progress::default());
+    let a = analyse(
+        std::slice::from_ref(&dir),
+        DEFAULT_MAX_DISTANCE,
+        &Progress::default(),
+        &mut Cache::default(),
+    );
     println!(
         "analyse complete : {} photos, {} groupes en {:.2} s",
         a.photos.len(),
