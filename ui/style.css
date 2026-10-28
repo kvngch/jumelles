@@ -42,6 +42,12 @@ ul {
   color: var(--discret);
 }
 
+.avis li {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid #e0a03a;
+}
+
 .dossiers li {
   display: flex;
   align-items: center;

@@ -17,11 +17,21 @@ use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 use xxhash_rust::xxh3::{Xxh3, xxh3_128};
 
-/// Extensions retenues par le parcours, comparees sans tenir compte de la casse.
-pub const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "cr2", "cr3", "nef",
-    "arw", "dng", "orf", "rw2", "raf", "pef", "srw",
-];
+/// Extensions retenues par le parcours, comparees sans tenir compte de la casse
+const COMMON_EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp"];
+const HEIF_EXTENSIONS: &[&str] = &["heic", "heif"];
+const RAW_EXTENSIONS: &[&str] = &["cr2", "cr3", "nef", "arw", "dng", "orf", "rw2", "raf", "pef", "srw"];
+
+/// Famille de format, qui dit quelle extension de Windows decode la photo
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// Decodee par Windows sans extension
+    Common,
+    /// Extensions HEIF et HEVC du Microsoft Store
+    Heif,
+    /// Extension Raw Image du Microsoft Store
+    Raw,
+}
 
 /// Octets lus pour la premiere empreinte d'un fichier
 const HEAD: usize = 64 * 1024;
@@ -74,8 +84,9 @@ pub struct Analysis {
     pub groups: Vec<Vec<Member>>,
     /// Dossiers et fichiers illisibles, ignores
     pub unreadable: usize,
-    /// Photos lues mais pas decodees
-    pub undecodable: usize,
+    /// Photos lues mais pas decodees, faute de decodeur pour leur format ou parce que le
+    /// fichier est abime, en indices dans `photos`
+    pub undecodable: Vec<usize>,
     /// Photos decodees pendant cette analyse, les autres venant du cache
     pub decoded: usize,
 }
@@ -88,10 +99,20 @@ struct Exact {
     failed: usize,
 }
 
+pub fn format(path: &Path) -> Option<Format> {
+    let e = path.extension()?.to_str()?;
+    let is = |list: &[&str]| list.iter().any(|x| x.eq_ignore_ascii_case(e));
+    [
+        (COMMON_EXTENSIONS, Format::Common),
+        (HEIF_EXTENSIONS, Format::Heif),
+        (RAW_EXTENSIONS, Format::Raw),
+    ]
+    .into_iter()
+    .find_map(|(list, f)| is(list).then_some(f))
+}
+
 pub fn is_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+    format(path).is_some()
 }
 
 pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress, cache: &mut Cache) -> Analysis {
@@ -127,7 +148,6 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress, cache:
             print
         })
         .collect();
-    let undecodable = prints.iter().filter(|p| p.0.is_none()).count();
     let decoded = prints.iter().filter(|p| p.1).count();
     for (&i, (print, _)) in reps.iter().zip(prints) {
         photos[i].print = print;
@@ -138,6 +158,9 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress, cache:
             photos[i].print = print;
         }
     }
+    let undecodable = (0..photos.len())
+        .filter(|&i| !exact.dropped[i] && photos[i].print.is_none())
+        .collect();
     for p in photos.iter().filter(|p| p.print.is_some()) {
         cache.put(p.path.clone(), p.size, p.modified, p.print.unwrap());
     }
@@ -415,6 +438,9 @@ mod tests {
         assert!(!is_image(Path::new("notes.txt")));
         assert!(!is_image(Path::new("jpg")));
         assert!(!is_image(Path::new("archive.jpg.zip")));
+        assert_eq!(format(Path::new("IMG_0001.HEIC")), Some(Format::Heif));
+        assert_eq!(format(Path::new("DSC_0001.nef")), Some(Format::Raw));
+        assert_eq!(format(Path::new("photo.webp")), Some(Format::Common));
     }
 
     #[test]
@@ -514,7 +540,7 @@ mod tests {
             &Progress::default(),
             &mut Cache::default(),
         );
-        assert_eq!(r.undecodable, 0);
+        assert!(r.undecodable.is_empty());
         assert_eq!(r.groups.len(), 1, "{:?}", noms(&r));
         let g = &r.groups[0];
         let nom = |m: &Member| {
@@ -604,6 +630,28 @@ mod tests {
         // un cache abime se lit comme un cache vide
         fs::write(&fichier, b"JUMELLES\x01\x00\x00\x00\x05\x00").unwrap();
         assert!(Cache::load(&fichier).is_empty());
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn formats_non_lus() {
+        let d = dossier("formats");
+        photo(320, 240, 1).save(d.join("a.jpg")).unwrap();
+        fs::write(d.join("iphone.heic"), b"\0\0\0\x18ftypheic pas une vraie photo").unwrap();
+        fs::write(d.join("abimee.jpg"), b"\xff\xd8\xff pas une vraie photo").unwrap();
+        let r = analyse(
+            std::slice::from_ref(&d),
+            DEFAULT_MAX_DISTANCE,
+            &Progress::default(),
+            &mut Cache::default(),
+        );
+        let mut noms: Vec<_> = r
+            .undecodable
+            .iter()
+            .map(|&i| r.photos[i].path.file_name().unwrap().to_owned())
+            .collect();
+        noms.sort();
+        assert_eq!(noms, ["abimee.jpg", "iphone.heic"]);
         fs::remove_dir_all(d).unwrap();
     }
 }
