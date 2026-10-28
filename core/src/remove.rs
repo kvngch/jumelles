@@ -2,7 +2,7 @@
 //! deplacement dans un dossier choisi ailleurs.
 
 use crate::Analysis;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -48,6 +48,16 @@ pub fn plan(a: &Analysis, photos: &[usize]) -> Result<Plan, Refusal> {
     }
     let (remove, changed) = dedup.into_iter().partition(|&p| unchanged(&a.photos[p]));
     Ok(Plan { remove, changed })
+}
+
+/// Retire de l'analyse les photos qui ont quitte le disque, et les groupes qui n'en ont
+/// plus qu'une : une demande suivante ne peut pas compter sur une copie deja partie.
+pub fn forget(a: &mut Analysis, gone: &[usize]) {
+    let gone: HashSet<usize> = gone.iter().copied().collect();
+    for g in &mut a.groups {
+        g.retain(|m| !gone.contains(&m.photo));
+    }
+    a.groups.retain(|g| g.len() > 1);
 }
 
 fn unchanged(p: &crate::Photo) -> bool {
@@ -96,6 +106,17 @@ fn free_name(dest: &Path, name: &std::ffi::OsStr) -> PathBuf {
 
 #[cfg(windows)]
 pub use windows_bin::{has_recycle_bin, recycle};
+
+/// Hors Windows, ou le moteur est developpe, aucune corbeille
+#[cfg(not(windows))]
+pub fn has_recycle_bin(_: &Path) -> bool {
+    false
+}
+
+#[cfg(not(windows))]
+pub fn recycle(_: &[PathBuf], _: Option<isize>) -> io::Result<Vec<PathBuf>> {
+    Err(io::Error::other("corbeille de Windows seulement"))
+}
 
 #[cfg(windows)]
 mod windows_bin {
@@ -200,6 +221,18 @@ mod tests {
         assert_eq!(plan(&a, &[pa, pb, pc]), Err(Refusal::WholeGroup(0)));
         assert_eq!(plan(&a, &[pa, pb, pc, pc]), Err(Refusal::WholeGroup(0)));
         assert_eq!(plan(&a, &[idx("seule.jpg")]), Err(Refusal::Alone(idx("seule.jpg"))));
+
+        // une copie partie n'est plus comptee : les deux restantes ne peuvent pas partir ensemble
+        let mut apres = Analysis {
+            photos: a.photos.clone(),
+            groups: a.groups.clone(),
+            ..Default::default()
+        };
+        forget(&mut apres, &[pb]);
+        assert_eq!(apres.groups[0].len(), 2);
+        assert_eq!(plan(&apres, &[pa, pc]), Err(Refusal::WholeGroup(0)));
+        forget(&mut apres, &[pc]);
+        assert!(apres.groups.is_empty());
 
         // un fichier modifie depuis l'analyse est ecarte
         fs::write(d.join("c.jpg"), b"meme contenu, modifie ensuite").unwrap();

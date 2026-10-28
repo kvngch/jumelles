@@ -5,33 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jumelles</title>
   <link rel="stylesheet" href="style.css">
+  <script src="fr.js" defer></script>
+  <script src="en.js" defer></script>
   <script src="main.js" defer></script>
 </head>
 <body>
-  <h1>Jumelles</h1>
+  <header class="haut">
+    <span class="marque">Jumelles</span>
+    <span id="resume" class="resume discret"></span>
+    <button id="nouvelle" type="button" class="bouton" data-action="accueil" hidden></button>
+  </header>
 
-  <section>
-    <h2>Dossiers à analyser</h2>
-    <ul id="liste" class="dossiers"></ul>
-    <p id="vide" class="discret">Aucun dossier. Ajoutez-en un ou déposez-le dans la fenêtre.</p>
-    <div class="actions">
-      <button id="ajouter" type="button">Ajouter un dossier</button>
-      <label class="reglage">Ressemblance
-        <select id="ecart">
-          <option value="4">Stricte</option>
-          <option value="10" selected>Normale</option>
-          <option value="14">Large</option>
-        </select>
-      </label>
-      <button id="analyser" type="button" class="principal" disabled>Analyser</button>
+  <main id="ecran"></main>
+
+  <footer id="action" class="action" hidden>
+    <p id="total"></p>
+    <button id="deplacer" type="button" class="bouton" data-action="deplacer"></button>
+    <button id="corbeille" type="button" class="bouton principal" data-action="corbeille"></button>
+  </footer>
+
+  <dialog id="confirmer">
+    <h2 id="confirmer-titre" class="titre"></h2>
+    <p id="confirmer-texte"></p>
+    <div class="boutons">
+      <button id="confirmer-non" type="button" class="bouton"></button>
+      <button id="confirmer-oui" type="button" class="bouton principal"></button>
     </div>
-    <p id="etat" class="discret" role="status"></p>
-    <ul id="avis" class="avis"></ul>
-  </section>
+  </dialog>
 
-  <section id="resultats" hidden>
-    <h2 id="titre-resultats"></h2>
-    <div id="groupes"></div>
-  </section>
+  <div id="zoom" class="zoom" role="dialog" aria-modal="true" hidden>
+    <img id="zoom-image" alt="">
+    <button id="zoom-fermer" type="button" class="bouton"></button>
+  </div>
 </body>
 </html>
