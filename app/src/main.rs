@@ -1,7 +1,7 @@
 // Pas de console derriere la fenetre en release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use jumelles_core::{Cache, Progress};
+use jumelles_core::{Cache, Format, Progress};
 use serde::Serialize;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -26,7 +26,15 @@ struct Resultat {
     photos: usize,
     groupes: Vec<Vec<Fichier>>,
     illisibles: usize,
-    non_decodees: usize,
+    non_decodees: NonDecodees,
+}
+
+/// Photos non decodees par famille de format, pour dire quelle extension installer
+#[derive(Serialize, Default)]
+struct NonDecodees {
+    heif: usize,
+    raw: usize,
+    autres: usize,
 }
 
 #[derive(Serialize, Clone)]
@@ -95,11 +103,19 @@ async fn analyser(app: AppHandle, dossiers: Vec<PathBuf>, ecart: u32) -> Result<
                 ecart: m.distance,
             }
         };
+        let mut non_decodees = NonDecodees::default();
+        for &i in &analyse.undecodable {
+            match jumelles_core::format(&analyse.photos[i].path) {
+                Some(Format::Heif) => non_decodees.heif += 1,
+                Some(Format::Raw) => non_decodees.raw += 1,
+                _ => non_decodees.autres += 1,
+            }
+        }
         Resultat {
             photos: analyse.photos.len(),
             groupes: analyse.groups.iter().map(|g| g.iter().map(fichier).collect()).collect(),
             illisibles: analyse.unreadable,
-            non_decodees: analyse.undecodable,
+            non_decodees,
         }
     })
     .await

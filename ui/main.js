@@ -9,6 +9,11 @@ const jour = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' });
 const dossiers = [];
 let enCours = false;
 
+// En francais, 0 et 1 prennent le singulier
+const accord = (n, un, plusieurs) => `${nombre.format(n)} ${n > 1 ? plusieurs : un}`;
+// Guillemets francais, espaces fines insecables a l'interieur
+const cite = (s) => `\u00AB\u202F${s}\u202F\u00BB`;
+
 function poids(octets) {
   const unites = ['o', 'Ko', 'Mo', 'Go', 'To'];
   let i = 0;
@@ -55,12 +60,23 @@ function ressemblance(f, i) {
 
 function afficherResultats(r) {
   const liberable = r.groupes.reduce((s, g) => s + g.slice(1).reduce((t, f) => t + f.taille, 0), 0);
-  let etat = `${nombre.format(r.photos)} photos analysées`;
-  if (r.illisibles) etat += `, ${nombre.format(r.illisibles)} fichiers ou dossiers illisibles`;
-  if (r.nonDecodees) etat += `, ${nombre.format(r.nonDecodees)} photos dont le format n'a pas pu être lu`;
+  let etat = accord(r.photos, 'photo analysée', 'photos analysées');
+  if (r.illisibles) etat += `, ${accord(r.illisibles, 'fichier ou dossier illisible', 'fichiers ou dossiers illisibles')}`;
   $('etat').textContent = etat;
+  const n = r.nonDecodees;
+  const avis = [];
+  if (n.heif) {
+    avis.push(`${accord(n.heif, "photo HEIC n'a pas pu être lue", "photos HEIC n'ont pas pu être lues")}. Windows lit ce format avec les extensions ${cite("Extensions d'image HEIF")} et ${cite('Extensions vidéo HEVC')} du Microsoft Store.`);
+  }
+  if (n.raw) {
+    avis.push(`${accord(n.raw, "photo RAW n'a pas pu être lue", "photos RAW n'ont pas pu être lues")}. Windows lit ce format avec l'extension ${cite('Raw Image Extension')} du Microsoft Store.`);
+  }
+  if (n.autres) {
+    avis.push(`${accord(n.autres, "photo n'a pas pu être lue", "photos n'ont pas pu être lues")} : fichier abîmé ou format non pris en charge.`);
+  }
+  $('avis').replaceChildren(...avis.map((a) => element('li', a)));
   $('titre-resultats').textContent = r.groupes.length
-    ? `${nombre.format(r.groupes.length)} groupes, jusqu'à ${poids(liberable)} à libérer`
+    ? `${accord(r.groupes.length, 'groupe', 'groupes')}, jusqu'à ${poids(liberable)} à libérer`
     : 'Aucune photo en double';
   $('groupes').replaceChildren(...r.groupes.map((g) => {
     const identiques = g.every((f) => f.identique);
@@ -94,9 +110,9 @@ getCurrentWebview().onDragDropEvent((e) => {
 listen('avancement', (e) => {
   if (!enCours) return;
   const a = e.payload;
-  let etat = `${nombre.format(a.trouvees)} photos trouvées`;
-  if (a.aDecoder) etat = `Empreintes : ${nombre.format(a.decodees)} photos sur ${nombre.format(a.aDecoder)}`;
-  else if (a.aLire) etat = `Copies exactes : ${nombre.format(a.lues)} fichiers lus sur ${nombre.format(a.aLire)}`;
+  let etat = accord(a.trouvees, 'photo trouvée', 'photos trouvées');
+  if (a.aDecoder) etat = `Empreintes : ${nombre.format(a.decodees)} sur ${accord(a.aDecoder, 'photo', 'photos')}`;
+  else if (a.aLire) etat = `Copies exactes : ${nombre.format(a.lues)} sur ${accord(a.aLire, 'fichier lu', 'fichiers lus')}`;
   $('etat').textContent = etat;
 });
 
