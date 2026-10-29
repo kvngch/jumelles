@@ -120,21 +120,29 @@ class Appli:
             raise
 
     def ouvrir(self, pw, francais):
-        for _ in range(120):
-            try:
-                self.navigateur = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{Appli.port}")
-                break
-            except Exception:
+        # Playwright rate parfois la page deja ouverte quand il se branche pendant son
+        # chargement : il se debranche alors et se rebranche
+        for essai in range(4):
+            for _ in range(120):
+                try:
+                    self.navigateur = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{Appli.port}")
+                    break
+                except Exception:
+                    time.sleep(0.5)
+            else:
+                raise RuntimeError("WebView2 injoignable")
+            for _ in range(30):
+                pages = [p for c in self.navigateur.contexts for p in c.pages]
+                if pages:
+                    break
                 time.sleep(0.5)
-        else:
-            raise RuntimeError("WebView2 injoignable")
-        for _ in range(120):
-            pages = [p for c in self.navigateur.contexts for p in c.pages]
             if pages:
                 break
-            time.sleep(0.5)
+            self.navigateur.close()
         else:
             raise RuntimeError("aucune page dans WebView2")
+        if essai:
+            R.note(f"page trouvée au branchement {essai + 1} de Playwright")
         self.page = next((p for p in pages if "tauri.localhost" in p.url), pages[0])
         self.erreurs = []
         self.page.on("console", lambda m: m.type == "error" and self.erreurs.append(m.text))
