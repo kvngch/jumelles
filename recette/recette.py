@@ -450,6 +450,26 @@ def avis_attendus(appli, resultat):
     return a
 
 
+def etape(titre, fonction, *args):
+    """Partie d'un scenario : son echec est rapporte, la suite continue depuis la vue
+    d'ensemble"""
+    try:
+        return fonction(*args)
+    except Exception:
+        R.ok(False, f"{titre} va jusqu'au bout", traceback.format_exc().strip().splitlines()[-1])
+        R.bloc(traceback.format_exc())
+        a = args[0] if args and isinstance(args[0], Appli) else None
+        if a:
+            try:
+                a.ev("""() => {
+                    document.getElementById('zoom').hidden = true;
+                    if (document.getElementById('confirmer').open) document.getElementById('confirmer').close();
+                    if (etat.resultat && !etat.occupe) { etat.ecran = 'groupes'; rendre(); }
+                }""")
+            except Exception:
+                pass
+
+
 def non_lus(prefixe, extensions):
     """Fichiers du jeu de ces formats que Windows ne decode pas"""
     return sum(1 for r in ATTENDU if r.startswith(prefixe) and Path(r).suffix.lower() in extensions and not decodable(r))
@@ -492,80 +512,87 @@ def scenario_principal(pw):
         R.ok(a.avis() == avis_attendus(a, resultat), "messages de fin d'analyse", " | ".join(a.avis()))
         R.capture(a.page, "03-ensemble")
 
-        # fenetre a l'ouverture, sur l'ecran du runner
-        h = findwindows.find_windows(process=a.pid, title="Jumelles")[0]
-        rect = win32gui.GetWindowRect(h)
-        travail = win32api.GetMonitorInfo(win32api.MonitorFromWindow(h))["Work"]
-        placement = win32gui.GetWindowPlacement(h)
-        R.note(f"fenêtre {rect[2] - rect[0]} x {rect[3] - rect[1]} en ({rect[0]}, {rect[1]}), "
-               f"{'agrandie' if placement[1] == 3 else 'non agrandie'}, zone de travail de l'écran {travail[2]} x {travail[3]}")
-        gauche, haut = win32gui.ClientToScreen(h, (0, 0))
-        largeur, hauteur = win32gui.GetClientRect(h)[2:]
-        R.ok(gauche >= travail[0] and haut >= travail[1] and gauche + largeur <= travail[2] and haut + hauteur <= travail[3],
-             "la fenêtre tient dans la zone de travail de l'écran", f"intérieur {largeur} x {hauteur} en ({gauche}, {haut})")
-        ImageGrab.grab().save(SORTIE / "bureau.png")
-        R.lignes.append("- capture : `bureau.png`")
+        etape("Fenêtre et clavier", fenetre_et_clavier, a)
 
-        # clavier dans la vue d'ensemble : fleches puis Entree
-        a.page.focus(".ligne >> nth=0")
-        actif = "() => document.activeElement?.dataset?.ouvrir ?? document.activeElement?.tagName"
-        suivi = [a.ev(actif)]
-        for touche in ("ArrowDown", "ArrowDown"):
-            a.page.keyboard.press(touche)
-            suivi.append(a.ev(actif))
-        a.page.keyboard.press("Enter")
-        R.ok(a.ev("etat.ecran") == "groupe" and a.ev("etat.courant") == 2, "flèches et Entrée ouvrent le troisième groupe",
-             f"focus {suivi}, écran {a.ev('etat.ecran')}, groupe {a.ev('etat.courant')}")
-        if a.ev("etat.ecran") == "groupe":
-            a.page.keyboard.press("Escape")
-
-        # fenetre a sa taille minimale (720 x 480 points), comme apres un redimensionnement
-        try:
-            win32gui.ShowWindow(h, 9)  # SW_RESTORE : une fenetre agrandie ne se redimensionne pas
-            time.sleep(1)
-            r = win32gui.GetWindowRect(h)
-            bordure = (r[2] - r[0] - a.ev("innerWidth"), r[3] - r[1] - a.ev("innerHeight"))
-            win32gui.MoveWindow(h, 0, 0, 720 + bordure[0], 480 + bordure[1], True)
-            time.sleep(1)
-            visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
-            R.note(f"taille minimale : {a.ev('[innerWidth, innerHeight]')}")
-            R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans la vue d'ensemble")
-            R.capture(a.page, "03-ensemble-minimale")
-            a.page.click(".ligne >> nth=0")
-            a.vignettes(".photo img")
-            R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans un groupe")
-            R.capture(a.page, "04-groupe-minimale")
-            a.page.keyboard.press("Escape")
-        finally:
-            win32gui.SetWindowPlacement(h, placement)
-            time.sleep(1)
-
-        # onglets
-        for onglet in ("identiques", "proches", "aVerifier", "tous"):
-            a.page.click(f"[data-onglet={onglet}]")
-            compte = a.ev("o => etat.groupes.filter(filtres[o]).length", onglet)
-            lignes = a.ev("document.querySelectorAll('.ligne').length")
-            affiche = a.ev("document.querySelector('.onglet.actif .num').textContent")
-            R.ok(lignes == compte and re.sub(r"\D", "", affiche) == str(compte), f"onglet {onglet} : {compte} groupes")
-        R.ok(a.ev("etat.groupes.filter(filtres.identiques).length + etat.groupes.filter(filtres.proches).length === etat.groupes.length"),
-             "Identiques et Proches couvrent tous les groupes")
-        premieres = a.vignettes(".ligne:nth-child(-n+4) img")
-        R.ok(all(w > 0 for w, _ in premieres), "vignettes de la vue d'ensemble", str(premieres[:4]))
-
-        # nouvelle analyse, empreintes reprises du cache
-        a.page.click("[data-action=accueil]")
-        resultat2, mur2, _ = a.analyser()
-        R.note(f"seconde analyse : {resultat2['dureeMs'] / 1000:.1f} s (fenêtre : {mur2:.1f} s)")
-        R.ok(resultat2["dureeMs"] < resultat["dureeMs"] / 2, "le cache accélère la seconde analyse",
-             f"{resultat['dureeMs']} ms puis {resultat2['dureeMs']} ms")
-        R.ok(len(resultat2["groupes"]) == len(resultat["groupes"]), "mêmes groupes à la seconde analyse")
-        cache = EXE.with_name("jumelles.cache")
-        R.ok(cache.exists() and cache.stat().st_size > 0, "cache écrit à côté de l'exe", f"{cache.stat().st_size if cache.exists() else 0} octets")
-
-        page_de_groupe(a)
-        suppression_corbeille(a)
+        etape("Onglets et cache", onglets_et_cache, a, resultat)
+        etape("Page de groupe", page_de_groupe, a)
+        etape("Corbeille", suppression_corbeille, a)
     finally:
         a.fermer()
+
+
+def onglets_et_cache(a, resultat):
+    # onglets
+    for onglet in ("identiques", "proches", "aVerifier", "tous"):
+        a.page.click(f"[data-onglet={onglet}]")
+        compte = a.ev("o => etat.groupes.filter(filtres[o]).length", onglet)
+        lignes = a.ev("document.querySelectorAll('.ligne').length")
+        affiche = a.ev("document.querySelector('.onglet.actif .num').textContent")
+        R.ok(lignes == compte and re.sub(r"\D", "", affiche) == str(compte), f"onglet {onglet} : {compte} groupes")
+    R.ok(a.ev("etat.groupes.filter(filtres.identiques).length + etat.groupes.filter(filtres.proches).length === etat.groupes.length"),
+         "Identiques et Proches couvrent tous les groupes")
+    premieres = a.vignettes(".ligne:nth-child(-n+4) img")
+    R.ok(all(w > 0 for w, _ in premieres), "vignettes de la vue d'ensemble", str(premieres[:4]))
+
+    # nouvelle analyse, empreintes reprises du cache
+    a.page.click("[data-action=accueil]")
+    resultat2, mur2, _ = a.analyser()
+    R.note(f"seconde analyse : {resultat2['dureeMs'] / 1000:.1f} s (fenêtre : {mur2:.1f} s)")
+    R.ok(resultat2["dureeMs"] < resultat["dureeMs"] / 2, "le cache accélère la seconde analyse",
+         f"{resultat['dureeMs']} ms puis {resultat2['dureeMs']} ms")
+    R.ok(len(resultat2["groupes"]) == len(resultat["groupes"]), "mêmes groupes à la seconde analyse")
+    cache = EXE.with_name("jumelles.cache")
+    R.ok(cache.exists() and cache.stat().st_size > 0, "cache écrit à côté de l'exe", f"{cache.stat().st_size if cache.exists() else 0} octets")
+
+
+def fenetre_et_clavier(a):
+    # fenetre a l'ouverture, sur l'ecran du runner
+    h = findwindows.find_windows(process=a.pid, title="Jumelles")[0]
+    rect = win32gui.GetWindowRect(h)
+    travail = win32api.GetMonitorInfo(win32api.MonitorFromWindow(h))["Work"]
+    placement = win32gui.GetWindowPlacement(h)
+    R.note(f"fenêtre {rect[2] - rect[0]} x {rect[3] - rect[1]} en ({rect[0]}, {rect[1]}), "
+           f"{'agrandie' if placement[1] == 3 else 'non agrandie'}, zone de travail de l'écran {travail[2]} x {travail[3]}")
+    gauche, haut = win32gui.ClientToScreen(h, (0, 0))
+    largeur, hauteur = win32gui.GetClientRect(h)[2:]
+    R.ok(gauche >= travail[0] and haut >= travail[1] and gauche + largeur <= travail[2] and haut + hauteur <= travail[3],
+         "la fenêtre tient dans la zone de travail de l'écran", f"intérieur {largeur} x {hauteur} en ({gauche}, {haut})")
+    ImageGrab.grab().save(SORTIE / "bureau.png")
+    R.lignes.append("- capture : `bureau.png`")
+
+    # clavier dans la vue d'ensemble : fleches puis Entree
+    a.page.focus(".ligne >> nth=0")
+    actif = "() => document.activeElement?.dataset?.ouvrir ?? document.activeElement?.tagName"
+    suivi = [a.ev(actif)]
+    for touche in ("ArrowDown", "ArrowDown"):
+        a.page.keyboard.press(touche)
+        suivi.append(a.ev(actif))
+    a.page.keyboard.press("Enter")
+    R.ok(a.ev("etat.ecran") == "groupe" and a.ev("etat.courant") == 2, "flèches et Entrée ouvrent le troisième groupe",
+         f"focus {suivi}, écran {a.ev('etat.ecran')}, groupe {a.ev('etat.courant')}")
+    if a.ev("etat.ecran") == "groupe":
+        a.page.keyboard.press("Escape")
+
+    # fenetre a sa taille minimale (720 x 480 points), comme apres un redimensionnement
+    try:
+        win32gui.ShowWindow(h, 9)  # SW_RESTORE : une fenetre agrandie ne se redimensionne pas
+        time.sleep(1)
+        r = win32gui.GetWindowRect(h)
+        bordure = (r[2] - r[0] - a.ev("innerWidth"), r[3] - r[1] - a.ev("innerHeight"))
+        win32gui.MoveWindow(h, 0, 0, 720 + bordure[0], 480 + bordure[1], True)
+        time.sleep(1)
+        visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
+        R.note(f"taille minimale : {a.ev('[innerWidth, innerHeight]')}")
+        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans la vue d'ensemble")
+        R.capture(a.page, "03-ensemble-minimale")
+        a.page.click(".ligne >> nth=0")
+        a.vignettes(".photo img")
+        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans un groupe")
+        R.capture(a.page, "04-groupe-minimale")
+        a.page.keyboard.press("Escape")
+    finally:
+        win32gui.SetWindowPlacement(h, placement)
+        time.sleep(1)
 
 
 def page_de_groupe(a):
