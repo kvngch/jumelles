@@ -67,7 +67,7 @@ mod wic {
                 frame.GetSize(&mut width, &mut height)?;
                 let source = match reduced(f, &frame, SIDE as u32, SIDE as u32) {
                     Ok(s) => s,
-                    Err(_) => frame.cast()?,
+                    Err(_) => converted(f, &frame, &GUID_WICPixelFormat8bppGray)?,
                 };
                 let scaler = f.CreateBitmapScaler()?;
                 scaler.Initialize(&source, SIDE as u32, SIDE as u32, WICBitmapInterpolationModeFant)?;
@@ -99,7 +99,7 @@ mod wic {
                 let (tw, th) = (((w as f64 * scale) as u32).max(1), ((h as f64 * scale) as u32).max(1));
                 let source = match reduced(f, &frame, tw, th) {
                     Ok(s) => s,
-                    Err(_) => frame.cast()?,
+                    Err(_) => converted(f, &frame, &GUID_WICPixelFormat24bppBGR)?,
                 };
                 let scaler = f.CreateBitmapScaler()?;
                 scaler.Initialize(&source, tw, th, WICBitmapInterpolationModeFant)?;
@@ -151,6 +151,33 @@ mod wic {
                 &mut buf,
             )?;
             f.CreateBitmapFromMemory(w, h, &format, stride, &buf)?.cast()
+        }
+    }
+
+    /// Image en pleine definition, au format voulu. Un IWICBitmapScaler pose sur l'image
+    /// confie la reduction au decodeur s'il sait la faire : celui des HEIF reduit sans
+    /// moyenner les pixels, et l'empreinte en sort crenelee (microsoft/WindowsAppSDK#5160).
+    /// L'image d'un tel decodeur est donc copiee en memoire, et la reduction reste au Fant
+    /// de WIC.
+    unsafe fn converted(
+        f: &IWICImagingFactory,
+        frame: &IWICBitmapFrameDecode,
+        format: &windows::core::GUID,
+    ) -> windows::core::Result<IWICBitmapSource> {
+        unsafe {
+            let c = f.CreateFormatConverter()?;
+            c.Initialize(
+                frame,
+                format,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            if frame.cast::<IWICBitmapSourceTransform>().is_ok() {
+                return f.CreateBitmapFromSource(&c, WICBitmapCacheOnLoad)?.cast();
+            }
+            c.cast()
         }
     }
 
