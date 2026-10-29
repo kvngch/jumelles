@@ -80,8 +80,8 @@ pub struct Progress {
 #[derive(Debug, Default)]
 pub struct Analysis {
     pub photos: Vec<Photo>,
-    /// La reference en premier : plus grande definition, puis plus ancienne. Les groupes
-    /// qui liberent le plus de place viennent d'abord.
+    /// La reference en premier : un RAW, puis plus grande definition, puis plus ancienne.
+    /// Les groupes qui liberent le plus de place viennent d'abord.
     pub groups: Vec<Vec<Member>>,
     /// Dossiers et fichiers illisibles, ignores
     pub unreadable: usize,
@@ -177,15 +177,17 @@ pub fn analyse(roots: &[PathBuf], max_distance: u32, progress: &Progress, cache:
     }
 }
 
-/// Rassemble les photos proches autour de la meilleure, plus grande definition puis plus
-/// ancienne. Une photo ne rejoint un groupe que si elle est proche de sa reference, jamais
+/// Rassemble les photos proches autour de la meilleure : un RAW, puis plus grande definition,
+/// puis plus ancienne. Le JPEG d'un appareil peut depasser son RAW d'un pixel, et Windows ne
+/// lit du DNG que l'apercu. Une photo ne rejoint un groupe que si elle est proche de sa reference, jamais
 /// par ricochet d'une photo proche a une autre : la reference est celle que l'ecran de tri
 /// propose de garder.
 fn group(photos: &[Photo], reps: &[usize], exact: &[Vec<usize>], max: u32) -> Vec<Vec<Member>> {
     let mut copies: HashMap<usize, &[usize]> = exact.iter().map(|g| (g[0], &g[1..])).collect();
     let pixels = |i: usize| photos[i].print.map_or(0, |p| p.width as u64 * p.height as u64);
+    let raw = |i: usize| format(&photos[i].path) == Some(Format::Raw);
     let mut order: Vec<usize> = reps.iter().copied().filter(|&i| photos[i].print.is_some()).collect();
-    order.sort_by_key(|&i| (std::cmp::Reverse(pixels(i)), photos[i].modified, i));
+    order.sort_by_key(|&i| (!raw(i), std::cmp::Reverse(pixels(i)), photos[i].modified, i));
     let hashes: Vec<phash::Hashes> = order
         .iter()
         .filter_map(|&i| photos[i].print.map(|p| p.hashes))
@@ -591,6 +593,29 @@ mod tests {
             );
         }
         fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn raw_garde_devant_son_jpeg() {
+        let hashes = phash::Hashes {
+            coarse: [0; 8],
+            fine: [[0; 4]; 8],
+        };
+        let fiche = |nom: &str, width, height| Photo {
+            path: PathBuf::from(nom),
+            size: 1,
+            modified: 0,
+            print: Some(Print { width, height, hashes }),
+        };
+        // le JPEG du Canon EOS R6 fait un pixel de plus que son CR3 dans chaque sens
+        let photos = [
+            fiche("IMG_0001.JPG", 3408, 2272),
+            fiche("IMG_0001.CR3", 3407, 2271),
+            fiche("IMG_0001-petite.jpg", 1704, 1136),
+        ];
+        let g = group(&photos, &[0, 1, 2], &[], DEFAULT_MAX_DISTANCE);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].iter().map(|m| m.photo).collect::<Vec<_>>(), [1, 0, 2]);
     }
 
     #[test]
