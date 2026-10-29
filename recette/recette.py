@@ -901,6 +901,12 @@ def scenario_volume(pw):
         a.page.keyboard.press("2")
         R.note(f"marque au clavier : {(time.time() - t) * 1000:.0f} ms")
         R.note(f"mémoire privée après navigation : {a.memoire()}")
+        # images decodees gardees en cache par Chromium : rendues quand la memoire manque
+        cdp = a.page.context.new_cdp_session(a.page)
+        cdp.send("Memory.simulatePressureNotification", {"level": "critical"})
+        cdp.send("HeapProfiler.collectGarbage")
+        time.sleep(3)
+        R.note(f"mémoire privée après une alerte de mémoire simulée : {a.memoire()}")
         R.capture(a.page, "14-volume-groupe")
     finally:
         a.fermer()
