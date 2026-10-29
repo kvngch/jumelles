@@ -450,11 +450,9 @@ def verifier_groupes(resultat, prefixe, cle, titre):
         for k, m in g[1:]:
             if (empreinte(m["chemin"]) == ref_h) != m["identique"]:
                 erreurs_ident.append(k)
-        attendue = max(g, key=lambda x: (x[1]["largeur"] * x[1]["hauteur"], -x[1]["modifie"]))
-        if attendue[1]["largeur"] * attendue[1]["hauteur"] > ref_m["largeur"] * ref_m["hauteur"] or (
-            attendue[1]["largeur"] * attendue[1]["hauteur"] == ref_m["largeur"] * ref_m["hauteur"]
-            and attendue[1]["modifie"] < ref_m["modifie"]
-        ):
+        rang = lambda x: (Path(x[0]).suffix.lower() not in RAW, -x[1]["largeur"] * x[1]["hauteur"], x[1]["modifie"])
+        attendue = min(g, key=rang)
+        if rang(attendue) < rang(g[0]):
             erreurs_ref.append(f"{ref_k} avant {attendue[0]}")
         for k, m in g:
             if not m["largeur"]:
@@ -468,7 +466,7 @@ def verifier_groupes(resultat, prefixe, cle, titre):
             if taille != (m["largeur"], m["hauteur"]):
                 erreurs_dim.append(f"{k} : {m['largeur']} x {m['hauteur']} au lieu de {taille}")
     R.ok(not erreurs_ident, f"{titre} : « identique » vaut pour les seules copies octet pour octet", ", ".join(erreurs_ident[:5]))
-    R.ok(not erreurs_ref, f"{titre} : la photo gardée est la plus grande, puis la plus ancienne", ", ".join(erreurs_ref[:5]))
+    R.ok(not erreurs_ref, f"{titre} : la photo gardée est le RAW, sinon la plus grande, puis la plus ancienne", ", ".join(erreurs_ref[:5]))
     R.ok(not erreurs_dim, f"{titre} : dimensions affichées", ", ".join(erreurs_dim[:5]))
     if sans:
         R.note(f"{titre} : groupées sans dimensions (copies exactes d'une photo non décodée) : {', '.join(sans)}")

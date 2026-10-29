@@ -16,7 +16,7 @@ Chaque version publie l'empreinte SHA-256 de son zip. Pour la comparer, dans Pow
 
 1. Ajouter un ou plusieurs dossiers, par le bouton ou en les déposant dans la fenêtre. Les sous-dossiers sont parcourus.
 2. Choisir la ressemblance (stricte, normale ou large), puis lancer l'analyse.
-3. La vue d'ensemble liste les groupes. Dans chacun, la photo de plus grande définition, puis la plus ancienne, est gardée d'avance et les autres sont marquées à supprimer.
+3. La vue d'ensemble liste les groupes. Dans chacun, le RAW s'il y en a un, sinon la photo de plus grande définition, puis la plus ancienne, est gardée d'avance et les autres sont marquées à supprimer.
 4. Ouvrir un groupe pour comparer ses photos et changer les marques. Au clavier, les flèches passent d'un groupe à l'autre, un chiffre ne garde que la photo correspondante, Espace agrandit et Échap revient à la liste.
 5. « Envoyer à la corbeille » demande confirmation. Les photos restent récupérables dans la corbeille de Windows tant qu'elle n'est pas vidée. Les lecteurs réseau et les supports amovibles n'ont pas de corbeille : « Déplacer vers… » range leurs photos dans un dossier.
 
@@ -70,7 +70,7 @@ Each version publishes the SHA-256 hash of its zip. To compare it, in PowerShell
 
 1. Add one or more folders, with the button or by dropping them on the window. Subfolders are scanned.
 2. Pick the similarity (strict, normal or loose), then start the scan.
-3. The overview lists the groups. In each one, the photo with the highest resolution, then the oldest, is kept by default and the others are marked for deletion.
+3. The overview lists the groups. In each one, the RAW file if there is one, otherwise the photo with the highest resolution, then the oldest, is kept by default and the others are marked for deletion.
 4. Open a group to compare its photos and change the marks. On the keyboard, the arrows move between groups, a digit keeps only the matching photo, Space enlarges and Esc goes back to the list.
 5. "Move to Recycle Bin" asks for confirmation. The photos can be restored from the Windows Recycle Bin until it is emptied. Network drives and removable media have no Recycle Bin: "Move to…" puts their photos in a folder.
 
