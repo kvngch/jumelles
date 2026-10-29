@@ -1,5 +1,7 @@
 name: Recette
 
+# Recette de bout en bout sur un runner Windows, a la demande : l'exe de release pilote
+# sur un jeu de photos connu, rapport et captures en artefact
 on:
   workflow_dispatch:
   push:
@@ -8,7 +10,7 @@ on:
 jobs:
   recette:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       PYTHONUTF8: "1"
     steps:
@@ -20,14 +22,29 @@ jobs:
       - run: cargo build --release -p jumelles
       - run: pip install playwright pywinauto pillow pillow-heif rawpy psutil
 
-      - name: Fenetre et dialogue
-        continue-on-error: true
+      # ImDisk simule une cle USB : disque en memoire vu par Windows comme amovible
+      - run: choco install imdisk-toolkit -y --no-progress
+
+      - uses: actions/cache@v6
+        with:
+          path: C:\recette\telechargements
+          key: photos-${{ hashFiles('recette/commons.tsv', 'recette/photos.py') }}
+          restore-keys: photos-
+
+      - name: Jeu de photos
+        run: python recette/photos.py C:\recette\telechargements C:\recette\jeu
+
+      - name: Extensions du Microsoft Store
+        run: python recette/extensions.py C:\recette\extensions
+
+      - name: Recette
         run: |
-          mkdir C:\dossier-essai\sous | Out-Null
-          python recette/sonde.py target\release\jumelles.exe C:\dossier-essai
+          New-Item -ItemType Directory -Force C:\recette\app | Out-Null
+          Copy-Item target\release\jumelles.exe C:\recette\app\Jumelles.exe
+          python recette/recette.py C:\recette\app\Jumelles.exe C:\recette\jeu C:\recette\rapport C:\recette\extensions
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: sonde
-          path: "*.png"
+          name: recette
+          path: C:\recette\rapport

@@ -90,8 +90,11 @@ class Appli:
 
     def __init__(self, pw, exe=EXE, francais=True):
         Appli.port += 1
-        env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f"--remote-debugging-port={Appli.port}")
-        self.proc = subprocess.Popen([str(exe)], env=env)
+        ps(
+            "Set-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments' "
+            f"-Name '{exe.name}' -Value '--remote-debugging-port={Appli.port}'"
+        )
+        self.proc = subprocess.Popen([str(exe)])
         self.pid = self.proc.pid
         for _ in range(120):
             try:
@@ -718,6 +721,10 @@ def scenario_extensions(pw):
 
 
 def main():
+    # WebView2 ignore WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS et HKCU quand l'appli tourne en
+    # administrateur, comme tout ce que lance le runner : la strategie machine reste lue
+    # (WebView2Feedback #5645). Le port DevTools est donne par Appli.
+    ps("New-Item -Force 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments' | Out-Null")
     R.note(ps("(Get-CimInstance Win32_OperatingSystem).Caption + ' ' + (Get-CimInstance Win32_OperatingSystem).Version"))
     R.note(f"processeurs logiques : {os.cpu_count()}")
     formats = set()
