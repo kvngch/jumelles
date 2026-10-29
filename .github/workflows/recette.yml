@@ -57,6 +57,15 @@ jobs:
             cargo run -q --release -p jumelles-core --example wic -- $_.FullName "$sortie\$($_.Name).jpg" 2>&1 | Select-Object -First 16
           }
           python recette/vignettes.py C:\recette\jeu\formats $sortie
+          # distances par le decodage de l'analyse, et ses 32 x 32 niveaux de gris
+          $gris = 'C:\recette\rapport\gris'
+          New-Item -ItemType Directory -Force $gris | Out-Null
+          $f = 'C:\recette\jeu\formats'
+          $paires = @()
+          foreach ($n in 1080..1084) { $paires += "$f\IMG_$n.JPG", "$f\HEIC\IMG_$n.HEIC" }
+          foreach ($n in 1..4) { $paires += "$f\HEIC-reels\image$n.heic", "$f\HEIC-reels\JPEG\image$n.jpg" }
+          Get-ChildItem "$f\RAW" -File | ForEach-Object { $paires += $_.FullName, "$f\RAW\JPEG\$($_.BaseName).jpg" }
+          cargo run -q --release -p jumelles-core --example empreintes -- --gris $gris @paires
 
       - uses: actions/upload-artifact@v7
         if: always()

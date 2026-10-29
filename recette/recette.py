@@ -188,12 +188,13 @@ class Appli:
         return self.ev("s => [...document.querySelectorAll(s)].map(i => [i.naturalWidth, i.naturalHeight])", selecteur)
 
     def memoire(self):
-        """Memoire privee de Jumelles et de ses processus WebView2, en Mo"""
+        """Memoire privee de Jumelles, puis de ses processus WebView2, en Mo"""
         try:
             p = psutil.Process(self.pid)
-            return sum(x.memory_info().private for x in [p, *p.children(recursive=True)]) // 2**20
+            enfants = sum(x.memory_info().private for x in p.children(recursive=True))
+            return f"{p.memory_info().private // 2**20} Mo pour Jumelles, {enfants // 2**20} Mo pour WebView2"
         except psutil.Error:
-            return 0
+            return "?"
 
     def fermer(self):
         R.ok(not self.erreurs, "aucune erreur dans la console de l'interface", "; ".join(self.erreurs[:5]))
@@ -501,26 +502,34 @@ def scenario_principal(pw):
 
         # clavier dans la vue d'ensemble : fleches puis Entree
         a.page.focus(".ligne >> nth=0")
-        a.page.keyboard.press("ArrowDown")
-        a.page.keyboard.press("ArrowDown")
+        actif = "() => document.activeElement?.dataset?.ouvrir ?? document.activeElement?.tagName"
+        suivi = [a.ev(actif)]
+        for touche in ("ArrowDown", "ArrowDown"):
+            a.page.keyboard.press(touche)
+            suivi.append(a.ev(actif))
         a.page.keyboard.press("Enter")
-        R.ok(a.ev("etat.ecran") == "groupe" and a.ev("etat.courant") == 2, "flèches et Entrée ouvrent le troisième groupe")
-        a.page.keyboard.press("Escape")
+        R.ok(a.ev("etat.ecran") == "groupe" and a.ev("etat.courant") == 2, "flèches et Entrée ouvrent le troisième groupe",
+             f"focus {suivi}, écran {a.ev('etat.ecran')}, groupe {a.ev('etat.courant')}")
+        if a.ev("etat.ecran") == "groupe":
+            a.page.keyboard.press("Escape")
 
-        # fenetre a sa taille minimale
-        win32gui.MoveWindow(h, 0, 0, 400, 300, True)
-        time.sleep(1)
-        visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
-        R.note(f"taille minimale : {a.ev('[innerWidth, innerHeight]')}")
-        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans la vue d'ensemble")
-        R.capture(a.page, "03-ensemble-minimale")
-        a.page.click(".ligne >> nth=0")
-        a.vignettes(".photo img")
-        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans un groupe")
-        R.capture(a.page, "04-groupe-minimale")
-        a.page.keyboard.press("Escape")
-        win32gui.MoveWindow(h, *rect[:2], rect[2] - rect[0], rect[3] - rect[1], True)
-        time.sleep(1)
+        # fenetre a sa taille minimale (720 x 480 points), comme apres un redimensionnement
+        bordure = (rect[2] - rect[0] - a.ev("innerWidth"), rect[3] - rect[1] - a.ev("innerHeight"))
+        try:
+            win32gui.MoveWindow(h, 0, 0, 720 + bordure[0], 480 + bordure[1], True)
+            time.sleep(1)
+            visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
+            R.note(f"taille minimale : {a.ev('[innerWidth, innerHeight]')}")
+            R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans la vue d'ensemble")
+            R.capture(a.page, "03-ensemble-minimale")
+            a.page.click(".ligne >> nth=0")
+            a.vignettes(".photo img")
+            R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans un groupe")
+            R.capture(a.page, "04-groupe-minimale")
+            a.page.keyboard.press("Escape")
+        finally:
+            win32gui.MoveWindow(h, *rect[:2], rect[2] - rect[0], rect[3] - rect[1], True)
+            time.sleep(1)
 
         # onglets
         for onglet in ("identiques", "proches", "aVerifier", "tous"):
@@ -802,7 +811,7 @@ def scenario_volume(pw):
     try:
         a.deposer(JEU / "volume")
         resultat, mur, _ = a.analyser(timeout=1800)
-        R.note(f"analyse : {resultat['photos']} fichiers en {resultat['dureeMs'] / 1000:.1f} s, mémoire privée {a.memoire()} Mo")
+        R.note(f"analyse : {resultat['photos']} fichiers en {resultat['dureeMs'] / 1000:.1f} s, mémoire privée : {a.memoire()}")
         groupes, _ = verifier_groupes(resultat, "volume/", cle_jeu, "Volume")
         tailles = Counter(len(g) for g in groupes)
         R.ok(len(groupes) == 3000 and tailles == Counter({3: 3000}), "3 000 groupes de trois", str(dict(tailles)))
@@ -818,12 +827,25 @@ def scenario_volume(pw):
             a.page.wait_for_function("n => etat.courant === n", arg=len(durees) + 1)
             durees.append((time.time() - t) * 1000)
         moyenne = sum(durees) / len(durees)
-        R.note(f"groupe suivant au clavier : {moyenne:.0f} ms en moyenne, {max(durees):.0f} ms au plus")
+        R.note(f"groupe suivant au clavier, aller-retour du protocole DevTools compris : {moyenne:.0f} ms en moyenne, {max(durees):.0f} ms au plus")
+        # dans la page : changement de groupe et mise en page, sans l'aller-retour
+        page_seule = a.ev("""() => {
+            const d = [];
+            for (let k = 0; k < 20; k++) {
+                const t = performance.now();
+                aller(etat.courant + 1);
+                document.body.getBoundingClientRect();
+                d.push(performance.now() - t);
+            }
+            return d;
+        }""")
+        moyenne = sum(page_seule) / len(page_seule)
+        R.note(f"groupe suivant dans la page : {moyenne:.0f} ms en moyenne, {max(page_seule):.0f} ms au plus")
         R.ok(moyenne < 100, "passage d'un groupe à l'autre sous 100 ms avec 3 000 groupes", f"{moyenne:.0f} ms")
         t = time.time()
         a.page.keyboard.press("2")
         R.note(f"marque au clavier : {(time.time() - t) * 1000:.0f} ms")
-        R.note(f"mémoire privée après navigation : {a.memoire()} Mo")
+        R.note(f"mémoire privée après navigation : {a.memoire()}")
         R.capture(a.page, "14-volume-groupe")
     finally:
         a.fermer()
