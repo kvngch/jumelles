@@ -25,7 +25,7 @@ window.TEXTES.en = {
   nPhotos: (f, n) => `${f.n(n)} ${f.p(n, 'photo', 'photos')}`,
   groupes: 'Groups',
   sousTitre: (f, groupes, photos, duree) =>
-    `${f.n(groupes)} ${f.p(groupes, 'group', 'groups')} among ${f.n(photos)} ${f.p(photos, 'photo', 'photos')}, scanned in ${duree}. The framed photo is the one that stays: the highest resolution, then the oldest.`,
+    `${f.n(groupes)} ${f.p(groupes, 'group', 'groups')} among ${f.n(photos)} ${f.p(photos, 'photo', 'photos')}, scanned in ${duree}. The framed photo is the one that stays: the RAW file if there is one, otherwise the highest resolution, then the oldest.`,
   aucunGroupe: (f, photos, duree) =>
     `No duplicate among ${f.n(photos)} ${f.p(photos, 'photo', 'photos')}, scanned in ${duree}.`,
   illisibles: (f, n) => `${f.n(n)} unreadable ${f.p(n, 'file or folder', 'files or folders')} skipped.`,
