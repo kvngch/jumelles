@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 /// En-tete du fichier. La version change a chaque evolution des empreintes : un cache
 /// d'une autre version est ignore.
 const MAGIC: &[u8; 8] = b"JUMELLES";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy)]
 struct Entry {
