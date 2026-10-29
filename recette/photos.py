@@ -60,6 +60,14 @@ RAW = [
     ),
 ]
 
+# HEIC reels, profil ICC sans nclx, de dsoprea/heic-exif-samples (MIT) : (nom, sha1)
+HEIC = [
+    ("image1", "783878bafc4e176f21be45e2f24689bfe5cee8ff"),
+    ("image2", "a1a57a859bb119db9e8de3b31c98c72daf32c61d"),
+    ("image3", "a28d8bd42ef530d1b7b80f2f6295470444a97997"),
+    ("image4", "ccae227f831d8a3db778695f80856750ee99df1d"),
+]
+
 # Retouches du jeu principal, deux par original de 20 a 79
 RETOUCHES = ["gris", "eclaircie", "miroir", "tournee", "orientation", "recadree", "png", "tiff", "bmp", "gif"]
 
@@ -92,12 +100,16 @@ def originaux(dossier):
     for nom, numero, sha256 in RAW:
         url = f"https://raw.pixls.us/getfile.php/{numero}/nice/{urllib.parse.quote(nom)}"
         taches.append((url, dossier / f"{sha256[:16]}.{nom.rsplit('.', 1)[1]}", sha256, "sha256"))
+    for nom, sha1 in HEIC:
+        url = f"https://raw.githubusercontent.com/dsoprea/heic-exif-samples/master/{nom}.heic"
+        taches.append((url, dossier / f"{sha1}.heic", sha1, "sha1"))
     with ThreadPoolExecutor(4) as pool:
         list(pool.map(lambda t: telecharger(*t), taches))
     commons = [t[1] for t in taches[: len(lignes)]]
     # marque et modele : le nom sur raw.pixls.us porte des deux-points, refuses par Windows
-    raws = [(" ".join(nom.split(" - ")[:2]), t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) :])]
-    return commons, raws
+    raws = [(" ".join(nom.split(" - ")[:2]), t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) : len(lignes) + len(RAW)])]
+    heics = [(nom, t[1]) for (nom, _), t in zip(HEIC, taches[len(lignes) + len(RAW) :])]
+    return commons, raws, heics
 
 
 def ouvrir(src, cote=None):
@@ -144,6 +156,9 @@ def variante(tache):
         ouvrir(src, 1600).save(dst)
     elif sorte == "gif":
         ouvrir(src, 1200).convert("P", palette=Image.Palette.ADAPTIVE).save(dst)
+    elif sorte == "export":
+        # export JPEG d'un HEIC, pixels inchanges
+        ouvrir(src).save(dst, quality=90)
     elif sorte == "webp":
         ouvrir(src, 2000).save(dst, quality=80)
     elif sorte == "heic":
@@ -194,7 +209,7 @@ class Jeu:
         self.dates[rel] = T0 + 700 * 86400
 
 
-def construire(commons, raws, racine):
+def construire(commons, raws, heics, racine):
     jeu = Jeu(racine)
     nom = lambda i: f"IMG_{1000 + i}"
     for i, src in enumerate(commons):
@@ -255,6 +270,9 @@ def construire(commons, raws, racine):
     for k, (appareil, src) in enumerate(raws):
         jeu.ajouter(src, f"formats/RAW/{appareil}{src.suffix.upper()}", "copie", f"r{k}", 10, "raw")
         jeu.ajouter(src, f"formats/RAW/JPEG/{appareil}.jpg", "apercu", f"r{k}", 440)
+    for k, (nom_heic, src) in enumerate(heics):
+        jeu.ajouter(src, f"formats/HEIC-reels/{nom_heic}.heic", "copie", f"h{k}", 15, "original")
+        jeu.ajouter(src, f"formats/HEIC-reels/JPEG/{nom_heic}.jpg", "export", f"h{k}", 440)
 
     # Volume : 3 000 scenes de trois fichiers (original, copie, reduite) et 1 000 seules
     for n in range(4000):
@@ -302,9 +320,9 @@ def long(chemin):
 
 if __name__ == "__main__":
     debut = time.time()
-    commons, raws = originaux(Path(sys.argv[1]))
-    print(f"originaux : {len(commons)} photos, {len(raws)} RAW, {time.time() - debut:.0f} s", flush=True)
+    commons, raws, heics = originaux(Path(sys.argv[1]))
+    print(f"originaux : {len(commons)} photos, {len(raws)} RAW, {len(heics)} HEIC, {time.time() - debut:.0f} s", flush=True)
     racine = Path(sys.argv[2]).resolve()
     shutil.rmtree(racine, ignore_errors=True)
-    attendu = construire(commons, raws, racine)
+    attendu = construire(commons, raws, heics, racine)
     print(f"jeu : {len(attendu)} fichiers en {time.time() - debut:.0f} s")

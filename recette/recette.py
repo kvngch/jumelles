@@ -164,9 +164,10 @@ class Appli:
         return self.ev("s => [...document.querySelectorAll(s)].map(i => [i.naturalWidth, i.naturalHeight])", selecteur)
 
     def memoire(self):
+        """Memoire privee de Jumelles et de ses processus WebView2, en Mo"""
         try:
             p = psutil.Process(self.pid)
-            return sum(x.memory_info().rss for x in [p, *p.children(recursive=True)]) // 2**20
+            return sum(x.memory_info().private for x in [p, *p.children(recursive=True)]) // 2**20
         except psutil.Error:
             return 0
 
@@ -319,6 +320,7 @@ def lire_par_windows():
     lus = Counter(Path(r).suffix.lower() for r, d in WINDOWS.items() if d)
     tous = Counter(Path(r).suffix.lower() for r in WINDOWS)
     R.note("Windows décode : " + ", ".join(f"{e} {lus[e]} sur {n}" for e, n in sorted(tous.items())))
+    R.bloc("\n".join(f"{r} : {'%d x %d' % d if d else 'non décodé'}" for r, d in sorted(WINDOWS.items()) if r.startswith("formats/")))
 
 
 def decodable(rel):
@@ -776,7 +778,7 @@ def scenario_volume(pw):
     try:
         a.deposer(JEU / "volume")
         resultat, mur, _ = a.analyser(timeout=1800)
-        R.note(f"analyse : {resultat['photos']} fichiers en {resultat['dureeMs'] / 1000:.1f} s, mémoire {a.memoire()} Mo")
+        R.note(f"analyse : {resultat['photos']} fichiers en {resultat['dureeMs'] / 1000:.1f} s, mémoire privée {a.memoire()} Mo")
         groupes, _ = verifier_groupes(resultat, "volume/", cle_jeu, "Volume")
         tailles = Counter(len(g) for g in groupes)
         R.ok(len(groupes) == 3000 and tailles == Counter({3: 3000}), "3 000 groupes de trois", str(dict(tailles)))
@@ -793,11 +795,11 @@ def scenario_volume(pw):
             durees.append((time.time() - t) * 1000)
         moyenne = sum(durees) / len(durees)
         R.note(f"groupe suivant au clavier : {moyenne:.0f} ms en moyenne, {max(durees):.0f} ms au plus")
-        R.ok(moyenne < 250, "passage d'un groupe à l'autre sous 250 ms avec 3 000 groupes", f"{moyenne:.0f} ms")
+        R.ok(moyenne < 100, "passage d'un groupe à l'autre sous 100 ms avec 3 000 groupes", f"{moyenne:.0f} ms")
         t = time.time()
         a.page.keyboard.press("2")
         R.note(f"marque au clavier : {(time.time() - t) * 1000:.0f} ms")
-        R.note(f"mémoire après navigation : {a.memoire()} Mo")
+        R.note(f"mémoire privée après navigation : {a.memoire()} Mo")
         R.capture(a.page, "14-volume-groupe")
     finally:
         a.fermer()
