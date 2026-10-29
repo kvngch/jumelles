@@ -17,7 +17,12 @@ def ps(c):
 
 
 def etat(p):
-    print("processus :", [(x.name(), x.pid) for x in psutil.Process(p.pid).children(recursive=True)])
+    for x in psutil.Process(p.pid).children(recursive=True):
+        ligne = " ".join(x.cmdline())
+        if "--type=" not in ligne:
+            print("navigateur :", ligne[:1500])
+    udf = os.path.join(os.environ["LOCALAPPDATA"], "fr.kvngch.jumelles", "EBWebView")
+    print("DevToolsActivePort :", [os.path.join(r, f) for r, _, fs in os.walk(udf) for f in fs if f == "DevToolsActivePort"])
     print("fenetres :", [(h, findwindows.find_element(handle=h).name) for h in findwindows.find_windows(process=p.pid)])
     print(ps("Get-NetTCPConnection -State Listen | Where-Object LocalPort -ge 9000 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table | Out-String"))
 
@@ -30,6 +35,8 @@ print("politiques :", ps("Get-ChildItem -Recurse HKLM:\\SOFTWARE\\Policies\\Micr
 
 for essai, env in (
     ("variable", {"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--remote-debugging-port=9222"}),
+    ("variable et origines", {"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--remote-debugging-port=9222 --remote-allow-origins=*"}),
+    ("port 0", {"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--remote-debugging-port=0"}),
     ("registre", {}),
 ):
     print(f"\n=== essai par {essai}")

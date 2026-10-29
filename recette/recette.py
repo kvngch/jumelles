@@ -22,7 +22,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import psutil
-from PIL import Image
+from PIL import Image, ImageGrab
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop, findwindows
 
@@ -196,25 +196,35 @@ def choisir_dossier(appli, chemin):
 
 
 def attendre_fin(appli, timeout=300):
-    """Attend la fin d'une suppression ; un fichier ouvert ailleurs fait afficher par Windows
-    un dialogue, ou la recette choisit de l'ignorer"""
-    boutons_vus = []
+    """Attend la fin d'une suppression. Un fichier ouvert ailleurs fait afficher par Windows
+    un dialogue : la recette l'ignore (Skip), ou l'annule faute de ce bouton."""
+    vus = []
     fin = time.time() + timeout
     while appli.ev("etat.occupe"):
         if time.time() > fin:
-            raise RuntimeError("suppression trop longue")
+            raise RuntimeError("suppression trop longue : " + " ; ".join(vus))
         for h in findwindows.find_windows(process=appli.pid, class_name="#32770", visible_only=True):
             try:
                 w = Desktop(backend="uia").window(handle=h)
-                noms = {b.window_text(): b for b in w.descendants(control_type="Button")}
+                titre = w.window_text()
+                boutons = {b.window_text(): b for b in w.descendants(control_type="Button") if b.window_text()}
             except Exception:
                 continue
+            vu = f"{titre} : {', '.join(boutons)}"
+            if vu not in vus:
+                vus.append(vu)
+                ImageGrab.grab().save(SORTIE / f"dialogue-{len(vus)}.png")
             for nom in ("Skip", "Ignorer"):
-                if nom in noms:
-                    boutons_vus.append(f"{w.window_text()} : {', '.join(n for n in noms if n)}")
-                    noms[nom].invoke()
+                if nom in boutons:
+                    boutons[nom].invoke()
+                    break
+            else:
+                if "In Use" in titre or "en cours d'utilisation" in titre:
+                    for nom in ("Cancel", "Annuler"):
+                        if nom in boutons:
+                            boutons[nom].invoke()
         time.sleep(0.3)
-    return boutons_vus
+    return vus
 
 
 def corbeille():
@@ -235,7 +245,7 @@ def corbeille():
 
 def win(chemin):
     """Chemin lisible au-dela de 260 caracteres"""
-    return "\\\\?\\" + chemin if len(chemin) > 240 and not chemin.startswith("\\\\") else chemin
+    return "\\\\?\\" + chemin if os.name == "nt" and len(chemin) > 240 and not chemin.startswith("\\\\") else chemin
 
 
 def empreinte(chemin):
@@ -666,9 +676,22 @@ def scenario_volume(pw):
 
 def scenario_extensions(pw):
     R.section("Extensions HEIF, HEVC, RAW et WebP du Microsoft Store")
-    for f in sorted(EXTENSIONS.glob("*.appx")) + sorted(EXTENSIONS.glob("*bundle")):
-        sortie = ps(f"Add-AppxPackage -Path '{f}'")
-        R.ok(not sortie, f"installation de {f.name.split('_')[0]}", sortie[:300])
+    for f in sorted(EXTENSIONS.glob("*.appx")):
+        R.note(f"{f.name.split('_')[0]} : " + (ps(f"Add-AppxPackage -Path '{f}'") or "installée"))
+    paquets = defaultdict(list)
+    for f in EXTENSIONS.glob("*bundle"):
+        paquets[f.name.split("_")[0]].append(f)
+    # la version la plus recente que ce Windows accepte
+    for nom, versions in sorted(paquets.items()):
+        refus = []
+        for f in sorted(versions, key=lambda f: [int(x) for x in f.name.split("_")[1].split(".")], reverse=True):
+            sortie = ps(f"Add-AppxPackage -Path '{f}'")
+            if not sortie:
+                break
+            refus.append(f"{f.name.split('_')[1]} : {sortie.splitlines()[0][:160]}")
+        else:
+            f = None
+        R.ok(f is not None, f"installation de {nom}" + (f" {f.name.split('_')[1]}" if f else ""), " ; ".join(refus))
     R.bloc(ps("Get-AppxPackage | Where-Object Name -match 'HEIF|HEVC|Raw|Webp' | ForEach-Object { $_.Name + ' ' + $_.Version }"))
     a = Appli(pw)
     try:
