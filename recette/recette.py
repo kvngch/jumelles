@@ -25,6 +25,8 @@ import psutil
 from PIL import Image, ImageGrab
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop, findwindows
+import win32api
+import win32gui
 
 EXE, JEU, SORTIE = (Path(a).resolve() for a in sys.argv[1:4])
 EXTENSIONS = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
@@ -459,8 +461,40 @@ def scenario_principal(pw):
         heic, raws = non_lus("photos/", {".heic", ".heif"}), non_lus("photos/", RAW)
         R.ok(nd["heif"] == heic, "HEIC non lus comptés à part, comme Windows", f"{nd['heif']} pour {heic}")
         R.ok(nd["raw"] == raws, "RAW non lus comptés à part, comme Windows", f"{nd['raw']} pour {raws}")
+        R.ok(resultat["illisibles"] == (1 if os.name == "nt" else 0), "un dossier que Windows refuse de lister compte comme illisible", str(resultat["illisibles"]))
         R.ok(a.avis() == avis_attendus(a, resultat), "messages de fin d'analyse", " | ".join(a.avis()))
         R.capture(a.page, "03-ensemble")
+
+        # fenetre a l'ouverture, sur l'ecran du runner
+        h = findwindows.find_windows(process=a.pid, title="Jumelles")[0]
+        rect = win32gui.GetWindowRect(h)
+        travail = win32api.GetMonitorInfo(win32api.MonitorFromWindow(h))["Work"]
+        R.note(f"fenêtre {rect[2] - rect[0]} x {rect[3] - rect[1]} en ({rect[0]}, {rect[1]}), zone de travail de l'écran {travail[2]} x {travail[3]}")
+        ImageGrab.grab().save(SORTIE / "bureau.png")
+        R.lignes.append("- capture : `bureau.png`")
+
+        # clavier dans la vue d'ensemble : fleches puis Entree
+        a.page.focus(".ligne >> nth=0")
+        a.page.keyboard.press("ArrowDown")
+        a.page.keyboard.press("ArrowDown")
+        a.page.keyboard.press("Enter")
+        R.ok(a.ev("etat.ecran") == "groupe" and a.ev("etat.courant") == 2, "flèches et Entrée ouvrent le troisième groupe")
+        a.page.keyboard.press("Escape")
+
+        # fenetre a sa taille minimale
+        win32gui.MoveWindow(h, 0, 0, 400, 300, True)
+        time.sleep(1)
+        visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
+        R.note(f"taille minimale : {a.ev('[innerWidth, innerHeight]')}")
+        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans la vue d'ensemble")
+        R.capture(a.page, "03-ensemble-minimale")
+        a.page.click(".ligne >> nth=0")
+        a.vignettes(".photo img")
+        R.ok(a.ev(visible), "taille minimale : bouton de la corbeille visible dans un groupe")
+        R.capture(a.page, "04-groupe-minimale")
+        a.page.keyboard.press("Escape")
+        win32gui.MoveWindow(h, *rect[:2], rect[2] - rect[0], rect[3] - rect[1], True)
+        time.sleep(1)
 
         # onglets
         for onglet in ("identiques", "proches", "aVerifier", "tous"):

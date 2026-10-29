@@ -279,6 +279,17 @@ def construire(commons, raws, racine):
 
     for rel, t in jeu.dates.items():
         os.utime(long(racine / rel), (t, t))
+
+    # dossier que Windows refuse de lister : compte comme illisible, sa photo reste invisible
+    verrou = racine / "photos/Verrouillé"
+    verrou.mkdir()
+    shutil.copyfile(commons[105], verrou / "IMG_1105.JPG")
+    jeu.attendu["photos/Verrouillé/IMG_1105.JPG"] = {"scene": None, "variante": "ignore"}
+    if os.name == "nt":
+        import subprocess
+
+        subprocess.run(["icacls", str(verrou), "/deny", "*S-1-1-0:(RD)"], check=True, capture_output=True)
+
     (racine / "attendu.json").write_text(json.dumps(jeu.attendu, ensure_ascii=False, indent=0), encoding="utf-8")
     return jeu.attendu
 
