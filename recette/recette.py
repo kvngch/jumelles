@@ -496,7 +496,13 @@ def scenario_principal(pw):
         h = findwindows.find_windows(process=a.pid, title="Jumelles")[0]
         rect = win32gui.GetWindowRect(h)
         travail = win32api.GetMonitorInfo(win32api.MonitorFromWindow(h))["Work"]
-        R.note(f"fenêtre {rect[2] - rect[0]} x {rect[3] - rect[1]} en ({rect[0]}, {rect[1]}), zone de travail de l'écran {travail[2]} x {travail[3]}")
+        placement = win32gui.GetWindowPlacement(h)
+        R.note(f"fenêtre {rect[2] - rect[0]} x {rect[3] - rect[1]} en ({rect[0]}, {rect[1]}), "
+               f"{'agrandie' if placement[1] == 3 else 'non agrandie'}, zone de travail de l'écran {travail[2]} x {travail[3]}")
+        gauche, haut = win32gui.ClientToScreen(h, (0, 0))
+        largeur, hauteur = win32gui.GetClientRect(h)[2:]
+        R.ok(gauche >= travail[0] and haut >= travail[1] and gauche + largeur <= travail[2] and haut + hauteur <= travail[3],
+             "la fenêtre tient dans la zone de travail de l'écran", f"intérieur {largeur} x {hauteur} en ({gauche}, {haut})")
         ImageGrab.grab().save(SORTIE / "bureau.png")
         R.lignes.append("- capture : `bureau.png`")
 
@@ -514,8 +520,11 @@ def scenario_principal(pw):
             a.page.keyboard.press("Escape")
 
         # fenetre a sa taille minimale (720 x 480 points), comme apres un redimensionnement
-        bordure = (rect[2] - rect[0] - a.ev("innerWidth"), rect[3] - rect[1] - a.ev("innerHeight"))
         try:
+            win32gui.ShowWindow(h, 9)  # SW_RESTORE : une fenetre agrandie ne se redimensionne pas
+            time.sleep(1)
+            r = win32gui.GetWindowRect(h)
+            bordure = (r[2] - r[0] - a.ev("innerWidth"), r[3] - r[1] - a.ev("innerHeight"))
             win32gui.MoveWindow(h, 0, 0, 720 + bordure[0], 480 + bordure[1], True)
             time.sleep(1)
             visible = "() => { const r = document.getElementById('corbeille').getBoundingClientRect(); return r.width > 0 && r.bottom <= innerHeight && r.right <= innerWidth }"
@@ -528,7 +537,7 @@ def scenario_principal(pw):
             R.capture(a.page, "04-groupe-minimale")
             a.page.keyboard.press("Escape")
         finally:
-            win32gui.MoveWindow(h, *rect[:2], rect[2] - rect[0], rect[3] - rect[1], True)
+            win32gui.SetWindowPlacement(h, placement)
             time.sleep(1)
 
         # onglets
