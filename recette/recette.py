@@ -151,6 +151,15 @@ class Appli:
     def ev(self, expr, arg=None):
         return self.page.evaluate(expr, arg)
 
+    def attendre(self, expr, arg=None, timeout=30):
+        """Attend qu'une expression soit vraie. Page.wait_for_function l'evaluerait par eval
+        dans la page, que la CSP de Jumelles refuse."""
+        fin = time.time() + timeout
+        while not self.ev(expr, arg):
+            if time.time() > fin:
+                raise TimeoutError(f"attente trop longue : {expr}")
+            time.sleep(0.05)
+
     def texte(self, cle, *args):
         """Texte de l'interface, calcule par ses propres fonctions"""
         return self.ev("([c, a]) => typeof T[c] === 'function' ? T[c](f, ...a) : T[c]", [cle, list(args)])
@@ -182,17 +191,19 @@ class Appli:
 
     def vignettes(self, selecteur, timeout=60):
         """Dimensions des vignettes une fois chargees, (0, 0) pour une vignette en echec"""
-        self.page.wait_for_function(
-            "s => [...document.querySelectorAll(s)].every(i => i.complete)", arg=selecteur, timeout=timeout * 1000
-        )
+        self.attendre("s => [...document.querySelectorAll(s)].every(i => i.complete)", selecteur, timeout)
         return self.ev("s => [...document.querySelectorAll(s)].map(i => [i.naturalWidth, i.naturalHeight])", selecteur)
 
     def memoire(self):
-        """Memoire privee de Jumelles, puis de ses processus WebView2, en Mo"""
+        """Memoire privee de Jumelles, puis de chaque sorte de processus WebView2, en Mo"""
         try:
             p = psutil.Process(self.pid)
-            enfants = sum(x.memory_info().private for x in p.children(recursive=True))
-            return f"{p.memory_info().private // 2**20} Mo pour Jumelles, {enfants // 2**20} Mo pour WebView2"
+            sortes = Counter()
+            for x in p.children(recursive=True):
+                sorte = next((a.split("=", 1)[1] for a in x.cmdline() if a.startswith("--type=")), "navigateur")
+                sortes[sorte] += x.memory_info().private
+            detail = ", ".join(f"{s} {v // 2**20}" for s, v in sortes.most_common())
+            return f"{p.memory_info().private // 2**20} Mo pour Jumelles, {sum(sortes.values()) // 2**20} Mo pour WebView2 ({detail})"
         except psutil.Error:
             return "?"
 
@@ -484,7 +495,7 @@ def scenario_principal(pw):
 
         a.page.click("[data-action=ajouter]")
         choisir_dossier(a, JEU / "photos")
-        a.page.wait_for_function("etat.dossiers.length === 1", timeout=10000)
+        a.attendre("etat.dossiers.length === 1", timeout=10)
         R.ok(a.ev("etat.dossiers") == [str(JEU / "photos")], "dossier choisi dans le dialogue de Windows", a.ev("etat.dossiers"))
 
         a.deposer(JEU / "photos" / "Sauvegarde", JEU / "anglais")
@@ -757,7 +768,7 @@ def lecteur_sans_corbeille(pw, titre, racine, dossiers, destination, ajout_par_d
         a.page.click("#deplacer")
         choisir_dossier(a, destination)
         attendre_fin(a)
-        a.page.wait_for_function("etat.marques.size === 0", timeout=60000)
+        a.attendre("etat.marques.size === 0", timeout=60)
         R.ok(not any(Path(c).exists() for c in a_suppr), f"{titre} : les photos ont quitté le lecteur")
         arrivees = sorted({p.name for p in destination.iterdir()} - avant)
         R.note(f"{titre} : arrivées dans {destination} : {', '.join(arrivees)}")
@@ -860,7 +871,7 @@ def scenario_volume(pw):
         for _ in range(20):
             t = time.time()
             a.page.keyboard.press("ArrowRight")
-            a.page.wait_for_function("n => etat.courant === n", arg=len(durees) + 1)
+            a.attendre("n => etat.courant === n", len(durees) + 1)
             durees.append((time.time() - t) * 1000)
         moyenne = sum(durees) / len(durees)
         R.note(f"groupe suivant au clavier, aller-retour du protocole DevTools compris : {moyenne:.0f} ms en moyenne, {max(durees):.0f} ms au plus")
