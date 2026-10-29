@@ -289,9 +289,26 @@ async fn deplacer(app: AppHandle, ids: Vec<usize>, dossier: PathBuf) -> Result<B
     .map_err(|e| e.to_string())?
 }
 
+/// Fenetre plus grande que la zone de travail de son ecran (portable en 1366 x 768) :
+/// agrandie, sans quoi la barre du bas passerait sous la barre des taches
+fn ajuster(w: &WebviewWindow) {
+    if let (Ok(Some(ecran)), Ok(taille)) = (w.current_monitor(), w.outer_size()) {
+        let zone = ecran.work_area().size;
+        if taille.width > zone.width || taille.height > zone.height {
+            let _ = w.maximize();
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Derniere::default())
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                ajuster(&w);
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("vignette", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
