@@ -145,10 +145,11 @@ def main():
     cookie = texte(minidom.parseString(soap("GetCookie", COOKIE)), "EncryptedData")
     for nom, categorie in EXTENSIONS.items():
         trouves = list(paquets(cookie, categorie))
-        # derniere version de l'extension, et ses dependances pour x64
-        extension = max((p for p in trouves if p[0].startswith(nom + "_")), key=lambda p: version(p[0]))
+        # toutes les versions de l'extension, la plus recente pouvant exiger une version de
+        # Windows plus recente que celle du runner, et ses dependances pour x64
+        versions = [p for p in trouves if p[0].startswith(nom + "_")]
         dependances = [p for p in trouves if not p[0].startswith(nom + "_") and "_x64_" in p[0]]
-        for identifiant, ext, update, revision in [extension, *dependances]:
+        for identifiant, ext, update, revision in versions + dependances:
             corps = URL.format(update=update, revision=revision, appareil=APPAREIL)
             doc = minidom.parseString(soap("GetExtendedUpdateInfo2", corps, securise=True))
             # les adresses de 99 caracteres sont celles des cartes de blocs
