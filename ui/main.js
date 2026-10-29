@@ -55,6 +55,7 @@ const etat = {
   groupes: [], // { membres, vu }
   marques: new Set(), // photos a supprimer
   onglet: 'tous',
+  vue: [], // groupes de l'onglet, figes le temps de la page de groupe
   courant: 0, // indice dans la liste de l'onglet
   avis: [], // bilan de la derniere suppression
   message: '',
@@ -71,7 +72,9 @@ const filtres = {
   proches: (g) => !identiques(g),
   aVerifier: (g) => !identiques(g) && !g.vu,
 };
-const liste = () => etat.groupes.filter(filtres[etat.onglet]);
+// Groupes de l'onglet. La page de groupe garde ceux de son ouverture : un groupe vu ne quitte
+// « A verifier » qu'au retour a la vue d'ensemble, sans decaler les groupes suivants.
+const liste = () => (etat.ecran === 'groupe' ? etat.vue : etat.groupes.filter(filtres[etat.onglet]));
 const aLiberer = (g) => g.membres.reduce((s, m) => s + (etat.marques.has(m.id) ? m.taille : 0), 0);
 const groupeDe = (id) => etat.groupes.find((g) => g.membres.some((m) => m.id === id));
 const resume = (g) => (identiques(g) ? T.identiques : `${T.proches}, ${T.pourcent(f, plusFaible(g))}`);
@@ -190,40 +193,43 @@ function fiche(g, m, i) {
 
 function page() {
   const l = liste();
-  const g = l[etat.courant];
-  g.vu = true;
   const menu = l
     .map(
       (h, i) =>
         `<li class="${i === etat.courant ? 'courant' : ''}" data-aller="${i}"><img src="${vignette(h.membres[0].id, 40)}" alt="" loading="lazy"><span>${resume(h)}<small class="num">${T.nPhotos(f, h.membres.length)}, ${f.poids(aLiberer(h))}</small></span></li>`,
     )
     .join('');
+  return `<section class="groupe">
+    <nav class="menu"><button type="button" class="retour" data-action="ensemble">${T.tousLesGroupes}</button><ol>${menu}</ol></nav>
+    <div class="page">${contenu(l)}</div>
+  </section>`;
+}
+
+// Page du groupe courant, sans le menu
+function contenu(l) {
+  const g = l[etat.courant];
+  g.vu = true;
   const [suivantOuPrecedent, garderCelleCi, agrandir, tous] = T.raccourcis;
   const chiffres = g.membres
     .slice(0, 9)
     .map((_, i) => `<kbd>${i + 1}</kbd>`)
     .join('');
-  return `<section class="groupe">
-    <nav class="menu"><button type="button" class="retour" data-action="ensemble">${T.tousLesGroupes}</button><ol>${menu}</ol></nav>
-    <div class="page">
-      <div class="page-tete">
-        <div>
-          <h1 class="titre">${T.groupeNumero(f, etat.courant + 1, l.length)}</h1>
-          <p class="sous-titre discret">${identiques(g) ? T.sousTitreIdentiques : T.sousTitreProches(f, plusFaible(g))}</p>
-        </div>
-        <button type="button" class="bouton" data-action="precedent" ${etat.courant === 0 ? 'disabled' : ''}>${T.precedent}</button>
-        <button type="button" class="bouton" data-action="suivant" ${etat.courant >= l.length - 1 ? 'disabled' : ''}>${T.suivant}</button>
-      </div>
-      <p id="message" class="message" role="status">${esc(etat.message)}</p>
-      <div class="photos n-${Math.min(g.membres.length, 4)}">${g.membres.map((m, i) => fiche(g, m, i)).join('')}</div>
-      <p class="raccourcis">
-        <span><kbd>←</kbd><kbd>→</kbd>${suivantOuPrecedent}</span>
-        <span>${chiffres}${garderCelleCi}</span>
-        <span><kbd>${T.espace}</kbd>${agrandir}</span>
-        <span><kbd>${T.echap}</kbd>${tous}</span>
-      </p>
+  return `<div class="page-tete">
+    <div>
+      <h1 class="titre">${T.groupeNumero(f, etat.courant + 1, l.length)}</h1>
+      <p class="sous-titre discret">${identiques(g) ? T.sousTitreIdentiques : T.sousTitreProches(f, plusFaible(g))}</p>
     </div>
-  </section>`;
+    <button type="button" class="bouton" data-action="precedent" ${etat.courant === 0 ? 'disabled' : ''}>${T.precedent}</button>
+    <button type="button" class="bouton" data-action="suivant" ${etat.courant >= l.length - 1 ? 'disabled' : ''}>${T.suivant}</button>
+  </div>
+  <p id="message" class="message" role="status">${esc(etat.message)}</p>
+  <div class="photos n-${Math.min(g.membres.length, 4)}">${g.membres.map((m, i) => fiche(g, m, i)).join('')}</div>
+  <p class="raccourcis">
+    <span><kbd>←</kbd><kbd>→</kbd>${suivantOuPrecedent}</span>
+    <span>${chiffres}${garderCelleCi}</span>
+    <span><kbd>${T.espace}</kbd>${agrandir}</span>
+    <span><kbd>${T.echap}</kbd>${tous}</span>
+  </p>`;
 }
 
 function barre() {
@@ -289,12 +295,18 @@ function garderSeulement(k) {
 }
 
 function aller(i) {
-  const l = liste();
-  if (i < 0 || i >= l.length) return;
+  if (etat.ecran !== 'groupe') etat.vue = liste();
+  if (i < 0 || i >= etat.vue.length) return;
+  const menu = etat.ecran === 'groupe' && document.querySelector('.menu');
   etat.courant = i;
   etat.message = '';
   etat.ecran = 'groupe';
-  rendre();
+  if (menu) {
+    // le menu garde ses lignes : seules la page et la ligne en surbrillance changent
+    menu.querySelector('li.courant')?.classList.remove('courant');
+    menu.querySelector(`li[data-aller="${i}"]`).classList.add('courant');
+    document.querySelector('.page').innerHTML = contenu(etat.vue);
+  } else rendre();
   document.querySelector('.page')?.scrollTo(0, 0);
   document.querySelector('.menu li.courant')?.scrollIntoView({ block: 'nearest' });
 }
