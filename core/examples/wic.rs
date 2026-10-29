@@ -54,6 +54,46 @@ fn main() {
         let pf = fr.GetPixelFormat().unwrap();
         let nom = formats.iter().find(|(g, _)| *g == pf).map_or("autre", |(_, n)| *n);
         println!("format de pixels : {nom} {pf:?}");
+        // apercu et vignettes embarques : taille et temps de decodage
+        let d = f
+            .CreateDecoderFromFilename(
+                &HSTRING::from(path.as_str()),
+                None,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )
+            .unwrap();
+        let mesure = |nom: &str, source: windows::core::Result<IWICBitmapSource>| {
+            let t0 = Instant::now();
+            match source {
+                Err(e) => println!("{nom} : absent ({:?})", e.code()),
+                Ok(s) => {
+                    let (mut pw, mut ph) = (0, 0);
+                    s.GetSize(&mut pw, &mut ph).unwrap();
+                    let conv = f.CreateFormatConverter().unwrap();
+                    let r = conv
+                        .Initialize(
+                            &s,
+                            &GUID_WICPixelFormat24bppBGR,
+                            WICBitmapDitherTypeNone,
+                            None,
+                            0.0,
+                            WICBitmapPaletteTypeCustom,
+                        )
+                        .and_then(|_| {
+                            let mut buf = vec![0u8; (pw * ph * 3) as usize];
+                            conv.CopyPixels(std::ptr::null(), pw * 3, &mut buf)
+                        });
+                    println!(
+                        "{nom} : {pw} x {ph}, {r:?} en {:.1} ms",
+                        t0.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        };
+        mesure("apercu du decodeur", d.GetPreview());
+        mesure("vignette du decodeur", d.GetThumbnail());
+        mesure("vignette de l'image", d.GetFrame(0).and_then(|fr| fr.GetThumbnail()));
         if let Some(sortie) = std::env::args().nth(2) {
             match jumelles_core::decode::thumbnail(std::path::Path::new(&path), 512) {
                 Ok(jpeg) => std::fs::write(&sortie, jpeg).unwrap(),
