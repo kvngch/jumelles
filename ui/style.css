@@ -211,18 +211,37 @@ h1 {
   border-bottom-color: var(--ambre);
 }
 
-.tableau {
-  display: grid;
-  grid-template-columns: 252px 1fr 84px 96px 128px;
-}
-
-/* Chaque ligne est une ligne de la grille, cellules alignees sur l'en-tete : une ligne en
-   display: contents n'aurait pas de boite, ni donc de focus */
+/* Une ligne en flex par groupe, colonnes de largeur fixe. Une ligne en display: contents
+   n'aurait pas de boite, ni donc de focus ; une sous-grille par ligne coute 200 Mo de plus
+   au rendu de 3 000 groupes. */
 .entete,
 .ligne {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
+  display: flex;
+}
+
+.entete > :nth-child(1),
+.ligne > :nth-child(1) {
+  flex: 0 0 252px;
+}
+
+.entete > :nth-child(2),
+.ligne > :nth-child(2) {
+  flex: 1 1 0;
+}
+
+.entete > :nth-child(3),
+.ligne > :nth-child(3) {
+  flex: 0 0 84px;
+}
+
+.entete > :nth-child(4),
+.ligne > :nth-child(4) {
+  flex: 0 0 96px;
+}
+
+.entete > :nth-child(5),
+.ligne > :nth-child(5) {
+  flex: 0 0 128px;
 }
 
 .entete > div {
@@ -260,7 +279,6 @@ h1 {
 }
 
 .vide {
-  grid-column: 1 / -1;
   padding: 16px 0;
 }
 
