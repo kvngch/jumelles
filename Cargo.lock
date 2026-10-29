@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "jumelles"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "jumelles-core",
  "rayon",
@@ -1992,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "jumelles-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "image",
  "rayon",
