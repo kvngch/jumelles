@@ -95,7 +95,8 @@ def originaux(dossier):
     with ThreadPoolExecutor(4) as pool:
         list(pool.map(lambda t: telecharger(*t), taches))
     commons = [t[1] for t in taches[: len(lignes)]]
-    raws = [(nom.rsplit(".", 1)[0], t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) :])]
+    # marque et modele : le nom sur raw.pixls.us porte des deux-points, refuses par Windows
+    raws = [(" ".join(nom.split(" - ")[:2]), t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) :])]
     return commons, raws
 
 

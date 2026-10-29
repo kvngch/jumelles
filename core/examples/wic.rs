@@ -1,7 +1,10 @@
 //! Diagnostic du decodage WIC d'une photo : taille et format que le decodeur propose en
 //! decodage reduit, temps du decodage reduit et du decodage en pleine definition.
 //!
-//! cargo run --release -p jumelles-core --example wic -- <photo>
+//! cargo run --release -p jumelles-core --example wic -- <photo> [vignette.jpg]
+//!
+//! Donne aussi le format de pixels du decodeur, et ecrit la vignette de l'ecran de tri
+//! (512 pixels) si un fichier est donne.
 
 #[cfg(not(windows))]
 fn main() {
@@ -35,6 +38,28 @@ fn main() {
         let (mut w, mut h) = (0, 0);
         fr.GetSize(&mut w, &mut h).unwrap();
         println!("taille : {w} x {h}");
+        let formats = [
+            (GUID_WICPixelFormat8bppGray, "8bppGray"),
+            (GUID_WICPixelFormat16bppGray, "16bppGray"),
+            (GUID_WICPixelFormat24bppBGR, "24bppBGR"),
+            (GUID_WICPixelFormat24bppRGB, "24bppRGB"),
+            (GUID_WICPixelFormat32bppBGR, "32bppBGR"),
+            (GUID_WICPixelFormat32bppBGRA, "32bppBGRA"),
+            (GUID_WICPixelFormat32bppPBGRA, "32bppPBGRA"),
+            (GUID_WICPixelFormat48bppRGB, "48bppRGB"),
+            (GUID_WICPixelFormat64bppRGBA, "64bppRGBA"),
+            (GUID_WICPixelFormat64bppRGBAHalf, "64bppRGBAHalf"),
+            (GUID_WICPixelFormat128bppRGBAFloat, "128bppRGBAFloat"),
+        ];
+        let pf = fr.GetPixelFormat().unwrap();
+        let nom = formats.iter().find(|(g, _)| *g == pf).map_or("autre", |(_, n)| *n);
+        println!("format de pixels : {nom} {pf:?}");
+        if let Some(sortie) = std::env::args().nth(2) {
+            match jumelles_core::decode::thumbnail(std::path::Path::new(&path), 512) {
+                Ok(jpeg) => std::fs::write(&sortie, jpeg).unwrap(),
+                Err(e) => println!("vignette : {e}"),
+            }
+        }
         match fr.cast::<IWICBitmapSourceTransform>() {
             Err(e) => println!("IWICBitmapSourceTransform absent : {e}"),
             Ok(t) => {

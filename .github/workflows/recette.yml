@@ -43,6 +43,21 @@ jobs:
           Copy-Item target\release\jumelles.exe C:\recette\app\Jumelles.exe
           python recette/recette.py C:\recette\app\Jumelles.exe C:\recette\jeu C:\recette\rapport C:\recette\extensions
 
+      # Decodage par le moteur des formats a extension, extensions installees par la recette :
+      # format de pixels du decodeur et vignette de l'ecran de tri, comparee aux pixels du
+      # fichier lus par une autre bibliotheque
+      - name: Diagnostic des formats
+        if: always()
+        shell: pwsh
+        run: |
+          $sortie = 'C:\recette\rapport\vignettes'
+          New-Item -ItemType Directory -Force $sortie | Out-Null
+          Get-ChildItem -Recurse C:\recette\jeu\formats -File | ForEach-Object {
+            "== $($_.Name)"
+            cargo run -q --release -p jumelles-core --example wic -- $_.FullName "$sortie\$($_.Name).jpg" 2>&1 | Select-Object -First 3
+          }
+          python recette/vignettes.py C:\recette\jeu\formats $sortie
+
       - uses: actions/upload-artifact@v7
         if: always()
         with:

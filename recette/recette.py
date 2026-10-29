@@ -104,7 +104,12 @@ class Appli:
                 time.sleep(0.5)
         else:
             raise RuntimeError("WebView2 injoignable")
-        self.page = self.navigateur.contexts[0].pages[0]
+        for _ in range(60):
+            pages = [p for c in self.navigateur.contexts for p in c.pages if "localhost" in p.url]
+            if pages:
+                break
+            time.sleep(0.5)
+        self.page = pages[0]
         self.erreurs = []
         self.page.on("console", lambda m: m.type == "error" and self.erreurs.append(m.text))
         self.page.on("pageerror", lambda e: self.erreurs.append(str(e)))
@@ -113,8 +118,9 @@ class Appli:
         if francais:
             # langue de Windows simulee avant le chargement de main.js
             self.page.add_init_script("Object.defineProperty(Navigator.prototype, 'language', {get: () => 'fr-FR'})")
-            self.page.reload()
-            self.page.wait_for_selector(".accueil")
+        # rechargement apres la pose des ecouteurs : les erreurs du demarrage sont comptees
+        self.page.reload()
+        self.page.wait_for_selector(".accueil")
 
     def ev(self, expr, arg=None):
         return self.page.evaluate(expr, arg)
@@ -168,8 +174,14 @@ class Appli:
             self.navigateur.close()
         except Exception:
             pass
+        try:
+            enfants = psutil.Process(self.pid).children(recursive=True)
+        except psutil.Error:
+            enfants = []
         self.proc.kill()
         self.proc.wait()
+        for e in psutil.wait_procs(enfants, timeout=15)[1]:
+            e.kill()
         time.sleep(1)
 
 
@@ -187,7 +199,12 @@ def choisir_dossier(appli, chemin):
     """Choix d'un dossier dans le dialogue de Windows, comme le ferait un utilisateur"""
     d = dialogue(appli.pid)
     d.wait("ready", timeout=15)
-    d.child_window(auto_id="1152", control_type="Edit").set_edit_text(str(chemin))
+    champs = d.descendants(control_type="Edit")
+    # champ « Dossier » du dialogue de Windows, 1148 dans sa version Vista, 1152 avant
+    champ = next((c for c in champs if c.element_info.automation_id in ("1148", "1152")), None)
+    if champ is None:
+        raise RuntimeError("champ du dossier introuvable : " + ", ".join(f"{c.element_info.name}/{c.element_info.automation_id}" for c in champs))
+    champ.set_edit_text(str(chemin))
     bouton = d.child_window(auto_id="1", control_type="Button")
     bouton.invoke()
     # un premier clic peut ouvrir le dossier tape au lieu de le choisir
@@ -205,11 +222,19 @@ def attendre_fin(appli, timeout=300):
     fin = time.time() + timeout
     while appli.ev("etat.occupe"):
         if time.time() > fin:
-            raise RuntimeError("suppression trop longue : " + " ; ".join(vus))
-        for h in findwindows.find_windows(process=appli.pid, class_name="#32770", visible_only=True):
+            ImageGrab.grab().save(SORTIE / "suppression-bloquee.png")
+            fenetres = []
+            for h in findwindows.find_windows(visible_only=True):
+                e = findwindows.find_element(handle=h)
+                if e.process_id == appli.pid or e.name.lower().startswith(("file", "fichier", "delet", "suppr")):
+                    fenetres.append(f"{e.class_name} « {e.name} » (processus {e.process_id})")
+            raise RuntimeError(f"suppression trop longue ; dialogues vus : {vus} ; fenêtres : {fenetres}")
+        for h in findwindows.find_windows(process=appli.pid, visible_only=True):
             try:
                 w = Desktop(backend="uia").window(handle=h)
                 titre = w.window_text()
+                if titre == "Jumelles":
+                    continue
                 boutons = {b.window_text(): b for b in w.descendants(control_type="Button") if b.window_text()}
             except Exception:
                 continue
@@ -255,26 +280,59 @@ def empreinte(chemin):
     return hashlib.sha1(Path(win(chemin)).read_bytes()).hexdigest()
 
 
-def decodable(rel, formats):
-    ext = Path(rel).suffix.lower()
-    v = ATTENDU[rel]["variante"]
-    if v in ("vide", "texte", "ignore"):
+# Formats qui dependent des extensions de Windows : Windows dit lui-meme, par WIC, s'il les
+# decode, et en quelle taille. Jumelles doit decoder exactement ceux-la.
+SPECIAUX = RAW | {".heic", ".heif", ".webp"}
+WINDOWS = {}
+
+LIRE = r"""
+param($liste)
+Add-Type -AssemblyName PresentationCore
+foreach ($p in Get-Content -LiteralPath $liste -Encoding UTF8) {
+  try {
+    $s = [IO.File]::OpenRead($p)
+    try {
+      $f = [Windows.Media.Imaging.BitmapFrame]::Create($s, [Windows.Media.Imaging.BitmapCreateOptions]::None, [Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+      "$($f.PixelWidth) $($f.PixelHeight)"
+    } finally { $s.Dispose() }
+  } catch { "0 0" }
+}
+"""
+
+
+def lire_par_windows():
+    """Decode par WPF, donc par WIC, les fichiers du jeu dont le format depend d'une extension"""
+    rels = [r for r in ATTENDU if Path(r).suffix.lower() in SPECIAUX]
+    liste, script = SORTIE / "speciaux.txt", SORTIE / "lire.ps1"
+    liste.write_text("\n".join(str(JEU / r) for r in rels), encoding="utf-8")
+    script.write_text(LIRE, encoding="utf-8")
+    sortie = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(liste)],
+        capture_output=True, text=True,
+    ).stdout.split("\n")
+    WINDOWS.clear()
+    for rel, ligne in zip(rels, sortie):
+        w, h = (int(x) for x in ligne.split())
+        WINDOWS[rel] = (w, h) if w else None
+    lus = Counter(Path(r).suffix.lower() for r, d in WINDOWS.items() if d)
+    tous = Counter(Path(r).suffix.lower() for r in WINDOWS)
+    R.note("Windows décode : " + ", ".join(f"{e} {lus[e]} sur {n}" for e, n in sorted(tous.items())))
+
+
+def decodable(rel):
+    if ATTENDU[rel]["variante"] in ("vide", "texte", "ignore"):
         return False
-    if ext in RAW:
-        return "raw" in formats
-    if ext in (".heic", ".heif"):
-        return "heif" in formats
-    if ext == ".webp":
-        return "webp" in formats
+    if Path(rel).suffix.lower() in SPECIAUX:
+        return WINDOWS.get(rel) is not None
     return True
 
 
-def verifier_groupes(resultat, prefixe, cle, formats, titre):
+def verifier_groupes(resultat, prefixe, cle, titre):
     """Compare les groupes trouves aux scenes du jeu ; cle(chemin de Jumelles) -> fichier du jeu"""
     fichiers = {rel: v for rel, v in ATTENDU.items() if rel.startswith(prefixe) and v["variante"] != "ignore"}
     scenes = defaultdict(set)
     for rel, v in fichiers.items():
-        if v["scene"] and decodable(rel, formats) and v["variante"] not in INDICATIVES | {"lien-dur"}:
+        if v["scene"] and decodable(rel) and v["variante"] not in INDICATIVES | {"lien-dur"}:
             scenes[v["scene"]].add(rel)
     attendus = {s: m for s, m in scenes.items() if len(m) > 1}
 
@@ -315,7 +373,7 @@ def verifier_groupes(resultat, prefixe, cle, formats, titre):
             R.note(f"{titre} : {rel} ({v['variante']}) {'retrouvée' if avec else 'non retrouvée'}")
 
     # drapeau identique, reference en tete, dimensions
-    erreurs_ident, erreurs_ref, erreurs_dim = [], [], []
+    erreurs_ident, erreurs_ref, erreurs_dim, sans = [], [], [], []
     for g in groupes:
         ref_k, ref_m = g[0]
         ref_h = empreinte(ref_m["chemin"])
@@ -329,14 +387,21 @@ def verifier_groupes(resultat, prefixe, cle, formats, titre):
         ):
             erreurs_ref.append(f"{ref_k} avant {attendue[0]}")
         for k, m in g:
-            if Path(k).suffix.lower() in RAW | {".heic"}:
+            if not m["largeur"]:
+                sans.append(k)
                 continue
-            with Image.open(win(m["chemin"])) as im:
-                if im.size != (m["largeur"], m["hauteur"]):
-                    erreurs_dim.append(f"{k} : {m['largeur']} x {m['hauteur']} au lieu de {im.size}")
+            if Path(k).suffix.lower() in SPECIAUX:
+                taille = WINDOWS.get(k)
+            else:
+                with Image.open(win(m["chemin"])) as im:
+                    taille = im.size
+            if taille != (m["largeur"], m["hauteur"]):
+                erreurs_dim.append(f"{k} : {m['largeur']} x {m['hauteur']} au lieu de {taille}")
     R.ok(not erreurs_ident, f"{titre} : « identique » vaut pour les seules copies octet pour octet", ", ".join(erreurs_ident[:5]))
     R.ok(not erreurs_ref, f"{titre} : la photo gardée est la plus grande, puis la plus ancienne", ", ".join(erreurs_ref[:5]))
     R.ok(not erreurs_dim, f"{titre} : dimensions affichées", ", ".join(erreurs_dim[:5]))
+    if sans:
+        R.note(f"{titre} : groupées sans dimensions (copies exactes d'une photo non décodée) : {', '.join(sans)}")
     return groupes, fichiers
 
 
@@ -356,7 +421,12 @@ def avis_attendus(appli, resultat):
     return a
 
 
-def scenario_principal(pw, formats):
+def non_lus(prefixe, extensions):
+    """Fichiers du jeu de ces formats que Windows ne decode pas"""
+    return sum(1 for r in ATTENDU if r.startswith(prefixe) and Path(r).suffix.lower() in extensions and not decodable(r))
+
+
+def scenario_principal(pw):
     R.section("Disque fixe : ajout, analyse, tri, corbeille")
     a = Appli(pw)
     try:
@@ -380,16 +450,15 @@ def scenario_principal(pw, formats):
         images = [rel for rel, v in ATTENDU.items() if rel.startswith("photos/") and v["variante"] != "ignore"]
         R.ok(resultat["photos"] == len(images), "toutes les photos du dossier sont trouvées, sous-dossier imbriqué compris une seule fois",
              f"{resultat['photos']} pour {len(images)}")
-        groupes, fichiers = verifier_groupes(resultat, "photos/", cle_jeu, formats, "Disque fixe")
+        groupes, fichiers = verifier_groupes(resultat, "photos/", cle_jeu, "Disque fixe")
         lien = "photos/Divers/lien-dur.jpg"
         R.ok(not any(k == lien or k == "photos/Originaux/IMG_1103.JPG" for g in groupes for k, _ in g),
              "un lien dur vers une photo n'en fait pas une copie")
         nd = resultat["nonDecodees"]
         R.note(f"non décodées : HEIC {nd['heif']}, RAW {nd['raw']}, autres {nd['autres']} ; illisibles : {resultat['illisibles']}")
-        heic = sum(1 for r in images if r.lower().endswith(".heic"))
-        raws = sum(1 for r in images if Path(r).suffix.lower() in RAW)
-        R.ok(nd["heif"] == (0 if "heif" in formats else heic), "HEIC comptés à part", f"{nd['heif']} pour {heic}")
-        R.ok(nd["raw"] == (0 if "raw" in formats else raws), "RAW comptés à part", f"{nd['raw']} pour {raws}")
+        heic, raws = non_lus("photos/", {".heic", ".heif"}), non_lus("photos/", RAW)
+        R.ok(nd["heif"] == heic, "HEIC non lus comptés à part, comme Windows", f"{nd['heif']} pour {heic}")
+        R.ok(nd["raw"] == raws, "RAW non lus comptés à part, comme Windows", f"{nd['raw']} pour {raws}")
         R.ok(a.avis() == avis_attendus(a, resultat), "messages de fin d'analyse", " | ".join(a.avis()))
         R.capture(a.page, "03-ensemble")
 
@@ -449,6 +518,17 @@ def page_de_groupe(a):
     zoom = a.vignettes("#zoom-image")
     R.ok(visible and zoom[0][0] > 0, "Espace : photo agrandie", str(zoom))
     R.capture(a.page, "05-agrandie")
+    avant = {p.pid for p in psutil.process_iter()}
+    a.page.dblclick("#zoom-image")
+    time.sleep(5)
+    lances = [p for p in psutil.process_iter(["name"]) if p.pid not in avant]
+    R.note("double-clic sur la photo agrandie, programmes lancés : " + (", ".join(sorted({p.info["name"] for p in lances})) or "aucun"))
+    for p in lances:
+        if p.info["name"] and p.info["name"].lower() not in ("conhost.exe", "msedgewebview2.exe", "powershell.exe"):
+            try:
+                p.kill()
+            except psutil.Error:
+                pass
     a.page.keyboard.press("Escape")
     R.ok(a.ev("document.getElementById('zoom').hidden"), "Échap ferme l'agrandissement")
     a.page.click(".menu li >> nth=2")
@@ -543,7 +623,7 @@ def lecteur_sans_corbeille(pw, titre, racine, dossiers, destination, ajout_par_d
         resultat, mur, _ = a.analyser()
         R.note(f"{titre} : {resultat['photos']} photos en {resultat['dureeMs'] / 1000:.1f} s")
         cle = lambda c: racine + "/" + c[len(dossiers) :].lstrip("\\").replace("\\", "/")
-        verifier_groupes(resultat, racine, cle, set(), titre)
+        verifier_groupes(resultat, racine, cle, titre)
         marques = a.ev("[...etat.marques]")
         chemins = dict(a.ev("etat.groupes.flatMap(g => g.membres).map(m => [m.id, m.chemin])"))
         a_suppr = [chemins[i] for i in marques]
@@ -604,7 +684,7 @@ def scenario_cache(pw):
     dossier.mkdir(parents=True, exist_ok=True)
     exe = dossier / EXE.name
     shutil.copy(EXE, exe)
-    subprocess.run(["icacls", str(dossier), "/deny", "*S-1-1-0:(OI)(CI)(W)"], capture_output=True)
+    subprocess.run(["icacls", str(dossier), "/deny", "*S-1-1-0:(WD,AD)"], capture_output=True)
     local = Path(os.environ["LOCALAPPDATA"]) / "Jumelles" / "jumelles.cache"
     local.unlink(missing_ok=True)
     a = Appli(pw, exe)
@@ -624,7 +704,7 @@ def scenario_anglais(pw):
         R.ok(a.ev("T.code") == "en", "anglais quand Windows n'est pas en français", a.langue)
         a.deposer(JEU / "anglais")
         resultat, _, _ = a.analyser()
-        verifier_groupes(resultat, "anglais/", cle_jeu, set(), "Anglais")
+        verifier_groupes(resultat, "anglais/", cle_jeu, "Anglais")
         R.ok(a.avis() == avis_attendus(a, resultat), "messages en anglais", " | ".join(a.avis()))
         ecrans = {}
         ecrans["ensemble"] = a.ev("document.body.innerText")
@@ -651,7 +731,7 @@ def scenario_volume(pw):
         a.deposer(JEU / "volume")
         resultat, mur, _ = a.analyser(timeout=1800)
         R.note(f"analyse : {resultat['photos']} fichiers en {resultat['dureeMs'] / 1000:.1f} s, mémoire {a.memoire()} Mo")
-        groupes, _ = verifier_groupes(resultat, "volume/", cle_jeu, set(), "Volume")
+        groupes, _ = verifier_groupes(resultat, "volume/", cle_jeu, "Volume")
         tailles = Counter(len(g) for g in groupes)
         R.ok(len(groupes) == 3000 and tailles == Counter({3: 3000}), "3 000 groupes de trois", str(dict(tailles)))
         rendu = a.ev("() => { const t = performance.now(); rendre(); return performance.now() - t }")
@@ -696,14 +776,25 @@ def scenario_extensions(pw):
             f = None
         R.ok(f is not None, f"installation de {nom}" + (f" {f.name.split('_')[1]}" if f else ""), " ; ".join(refus))
     R.bloc(ps("Get-AppxPackage | Where-Object Name -match 'HEIF|HEVC|Raw|Webp' | ForEach-Object { $_.Name + ' ' + $_.Version }"))
+    lire_par_windows()
     a = Appli(pw)
     try:
         a.deposer(JEU / "formats")
         resultat, mur, _ = a.analyser()
         R.note(f"analyse : {resultat['photos']} photos en {resultat['dureeMs'] / 1000:.1f} s")
         nd = resultat["nonDecodees"]
-        R.ok(nd == {"heif": 0, "raw": 0, "autres": 0}, "HEIC, RAW et WebP décodés", str(nd))
-        groupes, fichiers = verifier_groupes(resultat, "formats/", cle_jeu, {"heif", "raw", "webp"}, "Formats")
+        attendu = {"heif": non_lus("formats/", {".heic", ".heif"}), "raw": non_lus("formats/", RAW), "autres": non_lus("formats/", {".webp"})}
+        R.ok(nd == attendu, "Jumelles décode les HEIC, RAW et WebP que Windows décode", f"{nd} pour {attendu}")
+        groupes, fichiers = verifier_groupes(resultat, "formats/", cle_jeu, "Formats")
+        # RAW et JPEG de la meme prise : taille vue par Windows, taille du capteur, photo gardee
+        import rawpy
+        for g in groupes:
+            for k, m in g:
+                if Path(k).suffix.lower() in RAW:
+                    with rawpy.imread(win(m["chemin"])) as raw:
+                        capteur = f"{raw.sizes.width} x {raw.sizes.height}"
+                    gardee = "le RAW" if k == g[0][0] else f"{g[0][0].split('/')[-1]} ({g[0][1]['largeur']} x {g[0][1]['hauteur']})"
+                    R.note(f"{k.split('/')[-1]} : {m['largeur']} x {m['hauteur']} pour Windows, capteur {capteur}, gardée : {gardee}")
         R.capture(a.page, "15-formats-ensemble")
         # chaque groupe s'affiche, vignettes comprises
         echecs = []
@@ -727,10 +818,10 @@ def main():
     ps("New-Item -Force 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments' | Out-Null")
     R.note(ps("(Get-CimInstance Win32_OperatingSystem).Caption + ' ' + (Get-CimInstance Win32_OperatingSystem).Version"))
     R.note(f"processeurs logiques : {os.cpu_count()}")
-    formats = set()
+    lire_par_windows()
     with sync_playwright() as pw:
         for scenario in (
-            lambda: scenario_principal(pw, formats),
+            lambda: scenario_principal(pw),
             lambda: scenario_reseau(pw),
             lambda: scenario_amovible(pw),
             lambda: scenario_cache(pw),
