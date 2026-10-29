@@ -26,7 +26,7 @@ window.TEXTES.fr = {
   nPhotos: (f, n) => `${f.n(n)} ${f.p(n, 'photo', 'photos')}`,
   groupes: 'Groupes',
   sousTitre: (f, groupes, photos, duree) =>
-    `${f.n(groupes)} ${f.p(groupes, 'groupe', 'groupes')} parmi ${f.n(photos)} ${f.p(photos, 'photo analysée', 'photos analysées')} en ${duree}. La photo encadrée est celle qui reste : la plus grande définition, puis la plus ancienne.`,
+    `${f.n(groupes)} ${f.p(groupes, 'groupe', 'groupes')} parmi ${f.n(photos)} ${f.p(photos, 'photo analysée', 'photos analysées')} en ${duree}. La photo encadrée est celle qui reste : le RAW s'il y en a un, sinon la plus grande définition, puis la plus ancienne.`,
   aucunGroupe: (f, photos, duree) =>
     `Aucune photo en double parmi ${f.n(photos)} ${f.p(photos, 'photo analysée', 'photos analysées')} en ${duree}.`,
   illisibles: (f, n) => `${f.n(n)} ${f.p(n, 'fichier ou dossier illisible ignoré', 'fichiers ou dossiers illisibles ignorés')}.`,
