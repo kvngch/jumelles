@@ -1,0 +1,72 @@
+name: Recette
+
+# Recette de bout en bout sur un runner Windows, a la demande : l'exe de release pilote
+# sur un jeu de photos connu, rapport et captures en artefact
+on:
+  workflow_dispatch:
+
+jobs:
+  recette:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p jumelles
+      - run: pip install playwright pywinauto pillow pillow-heif rawpy psutil
+
+      # ImDisk simule une cle USB : disque en memoire vu par Windows comme amovible
+      - run: choco install imdisk-toolkit -y --no-progress
+
+      - uses: actions/cache@v6
+        with:
+          path: C:\recette\telechargements
+          key: photos-${{ hashFiles('recette/commons.tsv', 'recette/photos.py') }}
+          restore-keys: photos-
+
+      - name: Jeu de photos
+        run: python recette/photos.py C:\recette\telechargements C:\recette\jeu
+
+      - name: Extensions du Microsoft Store
+        run: python recette/extensions.py C:\recette\extensions
+
+      - name: Recette
+        run: |
+          New-Item -ItemType Directory -Force C:\recette\app | Out-Null
+          Copy-Item target\release\jumelles.exe C:\recette\app\Jumelles.exe
+          python recette/recette.py C:\recette\app\Jumelles.exe C:\recette\jeu C:\recette\rapport C:\recette\extensions
+
+      # Decodage par le moteur des formats a extension, extensions installees par la recette :
+      # format de pixels du decodeur et vignette de l'ecran de tri, comparee aux pixels du
+      # fichier lus par une autre bibliotheque
+      - name: Diagnostic des formats
+        if: always()
+        shell: pwsh
+        run: |
+          $sortie = 'C:\recette\rapport\vignettes'
+          New-Item -ItemType Directory -Force $sortie | Out-Null
+          Get-ChildItem -Recurse C:\recette\jeu\formats -File | ForEach-Object {
+            "== $($_.Name)"
+            cargo run -q --release -p jumelles-core --example wic -- $_.FullName "$sortie\$($_.Name).jpg" 2>&1 | Select-Object -First 16
+          }
+          python recette/vignettes.py C:\recette\jeu\formats $sortie
+          # distances par le decodage de l'analyse, et ses 32 x 32 niveaux de gris
+          $gris = 'C:\recette\rapport\gris'
+          New-Item -ItemType Directory -Force $gris | Out-Null
+          $f = 'C:\recette\jeu\formats'
+          $paires = @()
+          foreach ($n in 1080..1084) { $paires += "$f\IMG_$n.JPG", "$f\HEIC\IMG_$n.HEIC" }
+          foreach ($n in 1..4) { $paires += "$f\HEIC-reels\image$n.heic", "$f\HEIC-reels\JPEG\image$n.jpg" }
+          Get-ChildItem "$f\RAW" -File | ForEach-Object { $paires += $_.FullName, "$f\RAW\JPEG\$($_.BaseName).jpg" }
+          cargo run -q --release -p jumelles-core --example empreintes -- --gris $gris @paires
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: recette
+          path: C:\recette\rapport

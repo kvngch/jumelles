@@ -46,6 +46,8 @@ L'exe est `target\release\jumelles.exe`. Le moteur, dans `core`, se compile et s
 cargo test -p jumelles-core
 ```
 
+La recette de bout en bout se lance à la demande dans GitHub Actions (workflow `Recette`, dossier `recette`). L'exe de release y est piloté sur un runner Windows, avec des photos de Wikimedia Commons et de raw.pixls.us et les extensions d'image du Microsoft Store. Son rapport et ses captures sont gardés en artefact.
+
 ## Licence
 
 GPL-3.0 ou ultérieure, texte complet dans [LICENSE](LICENSE).
@@ -97,6 +99,8 @@ The exe is `target\release\jumelles.exe`. The engine, in `core`, also builds and
 ```
 cargo test -p jumelles-core
 ```
+
+The end-to-end acceptance test runs on demand in GitHub Actions (`Recette` workflow, `recette` folder). It drives the release exe on a Windows runner, with photos from Wikimedia Commons and raw.pixls.us and the Microsoft Store image extensions. Its report and screenshots are kept as an artifact.
 
 ### License
 

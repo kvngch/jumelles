@@ -1,7 +1,10 @@
 //! Diagnostic du decodage WIC d'une photo : taille et format que le decodeur propose en
 //! decodage reduit, temps du decodage reduit et du decodage en pleine definition.
 //!
-//! cargo run --release -p jumelles-core --example wic -- <photo>
+//! cargo run --release -p jumelles-core --example wic -- <photo> [vignette.jpg]
+//!
+//! Donne aussi le format de pixels du decodeur, et ecrit la vignette de l'ecran de tri
+//! (512 pixels) si un fichier est donne.
 
 #[cfg(not(windows))]
 fn main() {
@@ -35,6 +38,68 @@ fn main() {
         let (mut w, mut h) = (0, 0);
         fr.GetSize(&mut w, &mut h).unwrap();
         println!("taille : {w} x {h}");
+        let formats = [
+            (GUID_WICPixelFormat8bppGray, "8bppGray"),
+            (GUID_WICPixelFormat16bppGray, "16bppGray"),
+            (GUID_WICPixelFormat24bppBGR, "24bppBGR"),
+            (GUID_WICPixelFormat24bppRGB, "24bppRGB"),
+            (GUID_WICPixelFormat32bppBGR, "32bppBGR"),
+            (GUID_WICPixelFormat32bppBGRA, "32bppBGRA"),
+            (GUID_WICPixelFormat32bppPBGRA, "32bppPBGRA"),
+            (GUID_WICPixelFormat48bppRGB, "48bppRGB"),
+            (GUID_WICPixelFormat64bppRGBA, "64bppRGBA"),
+            (GUID_WICPixelFormat64bppRGBAHalf, "64bppRGBAHalf"),
+            (GUID_WICPixelFormat128bppRGBAFloat, "128bppRGBAFloat"),
+        ];
+        let pf = fr.GetPixelFormat().unwrap();
+        let nom = formats.iter().find(|(g, _)| *g == pf).map_or("autre", |(_, n)| *n);
+        println!("format de pixels : {nom} {pf:?}");
+        // apercu et vignettes embarques : taille et temps de decodage
+        let d = f
+            .CreateDecoderFromFilename(
+                &HSTRING::from(path.as_str()),
+                None,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )
+            .unwrap();
+        let mesure = |nom: &str, source: windows::core::Result<IWICBitmapSource>| {
+            let t0 = Instant::now();
+            match source {
+                Err(e) => println!("{nom} : absent ({:?})", e.code()),
+                Ok(s) => {
+                    let (mut pw, mut ph) = (0, 0);
+                    s.GetSize(&mut pw, &mut ph).unwrap();
+                    let conv = f.CreateFormatConverter().unwrap();
+                    let r = conv
+                        .Initialize(
+                            &s,
+                            &GUID_WICPixelFormat24bppBGR,
+                            WICBitmapDitherTypeNone,
+                            None,
+                            0.0,
+                            WICBitmapPaletteTypeCustom,
+                        )
+                        .and_then(|_| {
+                            let mut buf = vec![0u8; (pw * ph * 3) as usize];
+                            conv.CopyPixels(std::ptr::null(), pw * 3, &mut buf)
+                        });
+                    println!(
+                        "{nom} : {pw} x {ph}, {r:?} en {:.1} ms",
+                        t0.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        };
+        mesure("apercu du decodeur", d.GetPreview());
+        mesure("vignette du decodeur", d.GetThumbnail());
+        mesure("vignette de l'image", d.GetFrame(0).and_then(|fr| fr.GetThumbnail()));
+        if let Some(sortie) = std::env::args().nth(2) {
+            match jumelles_core::decode::thumbnail(std::path::Path::new(&path), 512) {
+                Ok(jpeg) => std::fs::write(&sortie, jpeg).unwrap(),
+                Err(e) => println!("vignette : {e}"),
+            }
+        }
         match fr.cast::<IWICBitmapSourceTransform>() {
             Err(e) => println!("IWICBitmapSourceTransform absent : {e}"),
             Ok(t) => {
