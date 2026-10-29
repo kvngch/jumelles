@@ -22,9 +22,10 @@ pub use portable::{small, thumbnail};
 mod wic {
     use super::Small;
     use crate::phash::SIDE;
+    use std::fs::File;
     use std::io;
+    use std::os::windows::io::AsRawHandle;
     use std::path::Path;
-    use windows::Win32::Foundation::GENERIC_READ;
     use windows::Win32::Graphics::Imaging::*;
     use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PropVariantClear};
     use windows::Win32::System::Com::{
@@ -32,7 +33,7 @@ mod wic {
     };
     use windows::Win32::System::Variant::VT_UI2;
     use windows::Win32::UI::Shell::SHCreateMemStream;
-    use windows::core::{HSTRING, Interface, w};
+    use windows::core::{Interface, w};
 
     thread_local! {
         // Une fabrique par fil de calcul, COM initialise en multithread
@@ -42,16 +43,25 @@ mod wic {
         };
     }
 
+    /// Decodeur de la photo. Le fichier est ouvert par Rust, qui passe la limite de 260
+    /// caracteres des chemins, et doit rester ouvert tant que le decodeur sert.
+    unsafe fn open(f: &IWICImagingFactory, path: &Path) -> io::Result<(File, IWICBitmapDecoder)> {
+        let file = File::open(path)?;
+        let decoder = unsafe {
+            f.CreateDecoderFromFileHandle(
+                file.as_raw_handle() as usize,
+                std::ptr::null(),
+                WICDecodeMetadataCacheOnDemand,
+            )?
+        };
+        Ok((file, decoder))
+    }
+
     pub fn small(path: &Path) -> io::Result<Small> {
         FACTORY.with(|factory| {
             let f = factory.as_ref().map_err(|e| io::Error::from(e.clone()))?;
             unsafe {
-                let decoder = f.CreateDecoderFromFilename(
-                    &HSTRING::from(path),
-                    None,
-                    GENERIC_READ,
-                    WICDecodeMetadataCacheOnDemand,
-                )?;
+                let (_file, decoder) = open(f, path)?;
                 let frame = decoder.GetFrame(0)?;
                 let (mut width, mut height) = (0, 0);
                 frame.GetSize(&mut width, &mut height)?;
@@ -81,12 +91,7 @@ mod wic {
         FACTORY.with(|factory| {
             let f = factory.as_ref().map_err(|e| io::Error::from(e.clone()))?;
             unsafe {
-                let decoder = f.CreateDecoderFromFilename(
-                    &HSTRING::from(path),
-                    None,
-                    GENERIC_READ,
-                    WICDecodeMetadataCacheOnDemand,
-                )?;
+                let (_file, decoder) = open(f, path)?;
                 let frame = decoder.GetFrame(0)?;
                 let (mut w, mut h) = (0, 0);
                 frame.GetSize(&mut w, &mut h)?;
@@ -281,5 +286,19 @@ mod tests {
         assert_eq!(dims("droite.jpg"), (200, 150));
         assert_eq!(dims("tournee.jpg"), (150, 200));
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn chemin_de_plus_de_260_caracteres() {
+        let racine = std::env::temp_dir().join(format!("jumelles-chemin-{}", std::process::id()));
+        let mut d = racine.clone();
+        while d.as_os_str().len() < 300 {
+            d.push("un dossier au nom assez long");
+        }
+        std::fs::create_dir_all(&d).unwrap();
+        jpeg(&d.join("photo.jpg"), None);
+        assert_eq!(small(&d.join("photo.jpg")).unwrap().width, 400);
+        assert!(thumbnail(&d.join("photo.jpg"), 100).is_ok());
+        std::fs::remove_dir_all(racine).unwrap();
     }
 }
