@@ -303,7 +303,8 @@ def attendre_fin(appli, timeout=300):
 
 
 def corbeille():
-    """Chemins d'origine des fichiers dans la corbeille de l'utilisateur, d'apres les $I"""
+    """Chemins d'origine des fichiers dans la corbeille de l'utilisateur, d'apres les $I,
+    en minuscules"""
     sid = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True).stdout
     sid = sid.strip().split(",")[-1].strip('"')
     chemins = set()
@@ -316,6 +317,27 @@ def corbeille():
             else:
                 chemins.add(b[24 : 24 + 520].decode("utf-16-le").split("\0")[0].lower())
     return chemins
+
+
+def sans_prefixe(chemin):
+    return chemin[4:] if chemin.startswith("\\\\?\\") else chemin
+
+
+def retrouver(chemin, enregistres):
+    """Chemin sous lequel la corbeille garde ce fichier : le meme, ou une autre ecriture du
+    meme dossier (nom court 8.3, prefixe \\?\\)"""
+    if chemin.lower() in enregistres:
+        return chemin.lower()
+    nom = os.path.basename(chemin).lower()
+    dossier = os.path.normcase(sans_prefixe(os.path.realpath(win(os.path.dirname(chemin)))))
+    for e in enregistres:
+        if os.path.basename(e) == nom:
+            try:
+                if os.path.normcase(sans_prefixe(os.path.realpath(sans_prefixe(os.path.dirname(e))))) == dossier:
+                    return e
+            except OSError:
+                pass
+    return None
 
 
 def win(chemin):
@@ -734,8 +756,15 @@ def suppression_corbeille(a):
         verrou.close()
     partis = [c for c in a_suppr if c not in (modifiee, ouverte)]
     dans = corbeille()
-    absents = [c for c in partis if Path(c).exists()]
-    pas_dans = [c for c in partis if c.lower() not in dans]
+    absents = [c for c in partis if Path(win(c)).exists()]
+    trouves = {c: retrouver(c, dans) for c in partis}
+    pas_dans = [c for c, e in trouves.items() if e is None]
+    for c, e in trouves.items():
+        if e and e != c.lower():
+            R.note(f"{os.path.basename(c)} est dans la corbeille sous le chemin {e}")
+    for c in pas_dans:
+        nom = os.path.basename(c).lower()
+        R.note(f"{nom} : entrées de la corbeille au même nom : {[e for e in dans if os.path.basename(e) == nom]}")
     R.ok(not absents, "les photos marquées ont quitté leur dossier", ", ".join(absents[:5]))
     R.ok(not pas_dans, "elles sont dans la corbeille de Windows", ", ".join(pas_dans[:5]))
     R.ok(Path(modifiee).exists(), "la photo modifiée depuis l'analyse est restée")
