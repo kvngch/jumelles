@@ -54,7 +54,7 @@ jobs:
           New-Item -ItemType Directory -Force $sortie | Out-Null
           Get-ChildItem -Recurse C:\recette\jeu\formats -File | ForEach-Object {
             "== $($_.Name)"
-            cargo run -q --release -p jumelles-core --example wic -- $_.FullName "$sortie\$($_.Name).jpg" 2>&1 | Select-Object -First 3
+            cargo run -q --release -p jumelles-core --example wic -- $_.FullName "$sortie\$($_.Name).jpg" 2>&1 | Select-Object -First 12
           }
           python recette/vignettes.py C:\recette\jeu\formats $sortie
 

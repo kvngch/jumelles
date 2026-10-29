@@ -107,7 +107,7 @@ def originaux(dossier):
         list(pool.map(lambda t: telecharger(*t), taches))
     commons = [t[1] for t in taches[: len(lignes)]]
     # marque et modele : le nom sur raw.pixls.us porte des deux-points, refuses par Windows
-    raws = [(" ".join(nom.split(" - ")[:2]), t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) : len(lignes) + len(RAW)])]
+    raws = [(" ".join(nom.rsplit(".", 1)[0].split(" - ")[:2]), t[1]) for (nom, _, _), t in zip(RAW, taches[len(lignes) : len(lignes) + len(RAW)])]
     heics = [(nom, t[1]) for (nom, _), t in zip(HEIC, taches[len(lignes) + len(RAW) :])]
     return commons, raws, heics
 

@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -33,7 +34,7 @@ EXTENSIONS = Path(sys.argv[4]).resolve() if len(sys.argv) > 4 else None
 ATTENDU = json.loads((JEU / "attendu.json").read_text(encoding="utf-8"))
 RAW = {".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2", ".raf", ".pef", ".srw"}
 # Variantes dont l'issue n'est pas une regle de Jumelles : rapportees sans verdict
-INDICATIVES = {"recadree", "tronquee", "chemin-long"}
+INDICATIVES = {"recadree", "tronquee", "chemin-long", "apercu"}
 
 
 class Rapport:
@@ -91,6 +92,14 @@ class Appli:
     port = 9222
 
     def __init__(self, pw, exe=EXE, francais=True):
+        # une instance precedente encore en vie garderait le navigateur WebView2, et son port
+        for p in psutil.process_iter(["name"]):
+            if (p.info["name"] or "").lower() in ("jumelles.exe", "msedgewebview2.exe"):
+                try:
+                    p.kill()
+                except psutil.Error:
+                    pass
+        time.sleep(1)
         Appli.port += 1
         ps(
             "Set-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments' "
@@ -98,6 +107,19 @@ class Appli:
         )
         self.proc = subprocess.Popen([str(exe)])
         self.pid = self.proc.pid
+        try:
+            self.ouvrir(pw, francais)
+        except Exception:
+            ImageGrab.grab().save(SORTIE / f"lancement-{Appli.port}.png")
+            try:
+                cibles = urllib.request.urlopen(f"http://127.0.0.1:{Appli.port}/json/list", timeout=5).read().decode()
+            except Exception as e:
+                cibles = str(e)
+            R.note(f"lancement en échec, cibles DevTools : {cibles[:600]}")
+            self.proc.kill()
+            raise
+
+    def ouvrir(self, pw, francais):
         for _ in range(120):
             try:
                 self.navigateur = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{Appli.port}")
@@ -106,12 +128,14 @@ class Appli:
                 time.sleep(0.5)
         else:
             raise RuntimeError("WebView2 injoignable")
-        for _ in range(60):
-            pages = [p for c in self.navigateur.contexts for p in c.pages if "localhost" in p.url]
+        for _ in range(120):
+            pages = [p for c in self.navigateur.contexts for p in c.pages]
             if pages:
                 break
             time.sleep(0.5)
-        self.page = pages[0]
+        else:
+            raise RuntimeError("aucune page dans WebView2")
+        self.page = next((p for p in pages if "tauri.localhost" in p.url), pages[0])
         self.erreurs = []
         self.page.on("console", lambda m: m.type == "error" and self.erreurs.append(m.text))
         self.page.on("pageerror", lambda e: self.erreurs.append(str(e)))
@@ -372,7 +396,7 @@ def verifier_groupes(resultat, prefixe, cle, titre):
     # variantes sans verdict
     for rel, v in fichiers.items():
         if v["variante"] in INDICATIVES and v["scene"]:
-            ref = next((m for m in scenes.get(v["scene"], ()) if fichiers[m]["variante"] == "original"), None)
+            ref = next((m for m in scenes.get(v["scene"], ()) if fichiers[m]["variante"] in ("original", "raw")), None)
             avec = ref is not None and rel in groupe_de and groupe_de[rel] == groupe_de.get(ref)
             R.note(f"{titre} : {rel} ({v['variante']}) {'retrouvée' if avec else 'non retrouvée'}")
 
