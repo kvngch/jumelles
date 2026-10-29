@@ -4,8 +4,6 @@ name: Recette
 # sur un jeu de photos connu, rapport et captures en artefact
 on:
   workflow_dispatch:
-  push:
-    branches: [recette]
 
 jobs:
   recette:
