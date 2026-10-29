@@ -589,6 +589,18 @@ def page_de_groupe(a):
     reste = a.ev("document.querySelectorAll('.ligne').length")
     proches = a.ev("etat.groupes.filter(filtres.proches).length")
     R.ok(reste == proches - vus, "les groupes ouverts quittent l'onglet À vérifier", f"{vus} vus, {reste} restent")
+
+    # onglet A verifier : la fleche droite parcourt ses groupes dans l'ordre (#25)
+    n = a.ev("liste().length")
+    a.page.click(".ligne >> nth=0")
+    parcours = []
+    for _ in range(min(n, 8)):
+        parcours.append((a.page.text_content(".page-tete h1"), a.ev("liste()[etat.courant]?.membres[0].id")))
+        a.page.keyboard.press("ArrowRight")
+    titres = [a.texte("groupeNumero", k + 1, n) for k in range(len(parcours))]
+    R.ok([t for t, _ in parcours] == titres and len({i for _, i in parcours}) == len(parcours),
+         "onglet À vérifier : la flèche droite parcourt ses groupes dans l'ordre", " | ".join(t for t, _ in parcours))
+    a.page.keyboard.press("Escape")
     a.page.click("[data-onglet=tous]")
 
     # orientation EXIF : la vignette de la variante tournee par etiquette est droite
