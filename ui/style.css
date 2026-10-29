@@ -216,9 +216,13 @@ h1 {
   grid-template-columns: 252px 1fr 84px 96px 128px;
 }
 
+/* Chaque ligne est une ligne de la grille, cellules alignees sur l'en-tete : une ligne en
+   display: contents n'aurait pas de boite, ni donc de focus */
 .entete,
 .ligne {
-  display: contents;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
 }
 
 .entete > div {
